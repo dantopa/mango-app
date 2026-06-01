@@ -89,58 +89,101 @@ export default function PatrimonioPage() {
           </div>
         </CardHeader>
         <CardContent className="px-0 pb-0">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Cuenta</TableHead>
-                <TableHead className="hidden sm:table-cell">Tipo</TableHead>
-                <TableHead className="hidden md:table-cell">Evolución</TableHead>
-                <TableHead className="text-right">Saldo nativo</TableHead>
-                <TableHead className="text-right">USD</TableHead>
-                <TableHead className="text-right">% del total</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {balances.map((b, i) => (
-                <TableRow key={b.account.id}>
-                  <TableCell>
+          {/* Mobile: card list */}
+          <ul className="divide-y divide-border md:hidden">
+            {balances.map((b, i) => (
+              <li key={b.account.id} className="flex flex-col gap-2 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2 font-medium">
                       <span
-                        className="size-2.5 rounded-full"
+                        className="size-2.5 shrink-0 rounded-full"
                         style={{ background: paletteColor(i) }}
                       />
-                      {b.account.name}
-                      {b.isPending && (
-                        <Badge variant="muted" className="ml-1">
-                          pendiente
-                        </Badge>
-                      )}
+                      <span className="truncate">{b.account.name}</span>
+                      {b.isPending && <Badge variant="muted">pendiente</Badge>}
                     </div>
-                    {b.notes && (
-                      <div className="ml-[18px] text-xs text-muted-foreground">{b.notes}</div>
-                    )}
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell">
-                    <Badge variant="secondary">{TYPE_LABEL[b.account.type]}</Badge>
-                  </TableCell>
-                  <TableCell className="hidden w-32 md:table-cell">
-                    <Sparkline data={b.sparkline} color={paletteColor(i)} />
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground tabular-nums">
-                    {formatNative(b.balanceNative, b.nativeCurrency)}
-                  </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
-                    {formatUsd(b.balanceUsd)}
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground tabular-nums">
-                    {summary.current > 0
-                      ? formatPercent(b.balanceUsd / summary.current)
-                      : "—"}
-                  </TableCell>
+                    <div className="ml-[18px] text-xs text-muted-foreground">
+                      {TYPE_LABEL[b.account.type]}
+                      {summary.current > 0
+                        ? ` · ${formatPercent(b.balanceUsd / summary.current)} del total`
+                        : ""}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="font-semibold tabular-nums">
+                      {formatUsd(b.balanceUsd)}
+                    </div>
+                    <div className="text-xs text-muted-foreground tabular-nums">
+                      {formatNative(b.balanceNative, b.nativeCurrency)}
+                    </div>
+                  </div>
+                </div>
+                <Sparkline data={b.sparkline} color={paletteColor(i)} />
+                {b.notes && (
+                  <div className="text-xs text-muted-foreground">{b.notes}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Cuenta</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Evolución</TableHead>
+                  <TableHead className="text-right">Saldo nativo</TableHead>
+                  <TableHead className="text-right">USD</TableHead>
+                  <TableHead className="text-right">% del total</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {balances.map((b, i) => (
+                  <TableRow key={b.account.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2 font-medium">
+                        <span
+                          className="size-2.5 rounded-full"
+                          style={{ background: paletteColor(i) }}
+                        />
+                        {b.account.name}
+                        {b.isPending && (
+                          <Badge variant="muted" className="ml-1">
+                            pendiente
+                          </Badge>
+                        )}
+                      </div>
+                      {b.notes && (
+                        <div className="ml-[18px] text-xs text-muted-foreground">
+                          {b.notes}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{TYPE_LABEL[b.account.type]}</Badge>
+                    </TableCell>
+                    <TableCell className="w-32">
+                      <Sparkline data={b.sparkline} color={paletteColor(i)} />
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground tabular-nums">
+                      {formatNative(b.balanceNative, b.nativeCurrency)}
+                    </TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">
+                      {formatUsd(b.balanceUsd)}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground tabular-nums">
+                      {summary.current > 0
+                        ? formatPercent(b.balanceUsd / summary.current)
+                        : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 

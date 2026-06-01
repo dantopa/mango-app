@@ -10,19 +10,21 @@ import {
   Target,
   Sparkles,
   LogOut,
-  Menu,
-  X,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/gastos", label: "Gastos", icon: Receipt },
-  { href: "/patrimonio", label: "Patrimonio", icon: Wallet },
-  { href: "/objetivos", label: "Objetivos", icon: Target },
+  { href: "/", label: "Dashboard", short: "Inicio", icon: LayoutDashboard },
+  { href: "/gastos", label: "Gastos", short: "Gastos", icon: Receipt },
+  { href: "/patrimonio", label: "Patrimonio", short: "Patrimonio", icon: Wallet },
+  { href: "/objetivos", label: "Objetivos", short: "Metas", icon: Target },
 ] as const;
+
+function isActive(pathname: string, href: string) {
+  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+}
 
 export function AppShell({
   email,
@@ -32,34 +34,9 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const [open, setOpen] = React.useState(false);
-
-  const nav = (
-    <nav className="flex flex-col gap-1">
-      {NAV.map(({ href, label, icon: Icon }) => {
-        const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={() => setOpen(false)}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              active
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-            )}
-          >
-            <Icon className="size-4" />
-            {label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
 
   const brand = (
-    <Link href="/" className="flex items-center gap-2 px-3" onClick={() => setOpen(false)}>
+    <Link href="/" className="flex items-center gap-2">
       <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <Sparkles className="size-4" />
       </div>
@@ -67,60 +44,89 @@ export function AppShell({
     </Link>
   );
 
-  const footer = (
-    <div className="border-t border-border p-3">
-      <div className="truncate px-3 pb-2 text-xs text-muted-foreground" title={email}>
-        {email}
-      </div>
-      <form action="/auth/signout" method="post">
-        <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground">
-          <LogOut className="size-4" />
-          Cerrar sesión
-        </Button>
-      </form>
-    </div>
-  );
-
   return (
     <div className="flex min-h-dvh">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-border bg-card md:flex">
-        <div className="flex h-16 items-center">{brand}</div>
-        <div className="flex-1 px-3 py-2">{nav}</div>
-        {footer}
+        <div className="flex h-16 items-center px-5">{brand}</div>
+        <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
+          {NAV.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                )}
+              >
+                <Icon className="size-4" />
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
+        <div className="border-t border-border p-3">
+          <div className="truncate px-3 pb-2 text-xs text-muted-foreground" title={email}>
+            {email}
+          </div>
+          <form action="/auth/signout" method="post">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-muted-foreground"
+            >
+              <LogOut className="size-4" />
+              Cerrar sesión
+            </Button>
+          </form>
+        </div>
       </aside>
 
       {/* Mobile top bar */}
-      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card px-3 md:hidden">
+      <header
+        className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card/95 px-4 backdrop-blur md:hidden"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
         {brand}
-        <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Menú">
-          <Menu className="size-5" />
-        </Button>
+        <form action="/auth/signout" method="post">
+          <Button variant="ghost" size="icon" aria-label="Cerrar sesión" className="text-muted-foreground">
+            <LogOut className="size-5" />
+          </Button>
+        </form>
       </header>
 
-      {/* Mobile drawer */}
-      {open && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setOpen(false)}
-          />
-          <aside className="absolute inset-y-0 left-0 flex w-64 flex-col border-r border-border bg-card">
-            <div className="flex h-16 items-center justify-between pr-3">
-              {brand}
-              <Button variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Cerrar">
-                <X className="size-5" />
-              </Button>
-            </div>
-            <div className="flex-1 px-3 py-2">{nav}</div>
-            {footer}
-          </aside>
-        </div>
-      )}
+      {/* Mobile bottom tab bar */}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-card/95 backdrop-blur md:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        {NAV.map(({ href, short, icon: Icon }) => {
+          const active = isActive(pathname, href);
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={cn(
+                "flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+                active ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              <Icon className={cn("size-5", active && "scale-110 transition-transform")} />
+              {short}
+            </Link>
+          );
+        })}
+      </nav>
 
       {/* Content */}
       <main className="flex-1 md:pl-60">
-        <div className="mx-auto max-w-6xl px-4 pb-16 pt-20 md:px-8 md:pt-8">{children}</div>
+        <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-[4.5rem] md:px-8 md:pb-16 md:pt-8">
+          {children}
+        </div>
       </main>
     </div>
   );

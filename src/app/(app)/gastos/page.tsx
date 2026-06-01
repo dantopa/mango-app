@@ -114,13 +114,13 @@ export default function GastosPage() {
         title="Gastos"
         description="Análisis de tus consumos por período y categoría."
         action={
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Switch checked={excludeExtra} onCheckedChange={setExcludeExtra} />
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+            <label className="flex items-center justify-between gap-2 text-sm text-muted-foreground sm:justify-start">
               Excluir extraordinarios
+              <Switch checked={excludeExtra} onCheckedChange={setExcludeExtra} />
             </label>
             <Select value={selectedMonth} onValueChange={setMonth}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-full sm:w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

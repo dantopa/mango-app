@@ -101,7 +101,7 @@ export default function DashboardPage() {
           <CardHeader>
             <CardDescription>Patrimonio neto</CardDescription>
             <div className="flex flex-wrap items-baseline gap-3">
-              <CardTitle className="text-4xl font-semibold tabular-nums tracking-tight">
+              <CardTitle className="text-3xl font-semibold tabular-nums tracking-tight sm:text-4xl">
                 {formatUsd(summary.current)}
               </CardTitle>
               <div className="flex items-center gap-2">
