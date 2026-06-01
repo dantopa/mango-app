@@ -25,22 +25,25 @@ analizás y los re-categorizás.
 | Ruta          | Qué muestra |
 |---------------|-------------|
 | `/`           | Dashboard: patrimonio neto actual + variación, evolución mensual, composición por cuenta, tracking del objetivo activo (ritmo requerido vs real). |
-| `/gastos`     | Selector de período, torta/barras por categoría, toggle para excluir extraordinarios, comparación mes vs mes, detección de patrones y tabla editable. |
+| `/gastos`     | Selector de período + **filtros faceteados combinables** (tipo de gasto, categoría, cuenta, país, medio de pago, búsqueda), **costo de vida mensual** (fijo + promedio variable), torta/barras por categoría, splits fijo/variable/extraordinario, por país y por cuenta, comparación mes vs mes y tabla editable (incl. dimensiones por transacción). |
 | `/patrimonio` | Saldos por cuenta (nativo + USD), sparkline histórico por cuenta y total consolidado. |
 | `/objetivos`  | CRUD de objetivos + proyección de cuándo llegás al ritmo actual. |
+| `/cierre`     | **Cierre mensual**: checklist guiado de las fuentes a cargar (extractos PDF, saldos, gmail-auto) con barra de progreso, botón "Cerrar mes" que congela el snapshot, e histórico de cierres. |
 
 ## Modelo de datos
 
-Cinco tablas, todas con `id uuid`, `created_at timestamptz` y `user_id` (RLS por
+Siete tablas, todas con `id uuid`, `created_at timestamptz` y `user_id` (RLS por
 dueño). **Toda la plata se guarda en moneda nativa Y con su valor en USD
 congelado al momento de la carga** (`fx_rate_to_usd` + `*_usd`), nunca se
 convierte on-the-fly.
 
-- `accounts` — catálogo de cuentas/billeteras. `type`: `crypto | broker | bank | wallet | cash`.
+- `accounts` — catálogo de cuentas/billeteras. `type`: `crypto | broker | bank | wallet | cash`. Dimensiones por defecto: `country` (`AR | CO | US | global`) y `payment_type` (`credito | debito | transferencia | pse_qr | efectivo | inversion | wallet`).
 - `categories` — categorías de gasto (con `parent_id`, `color`, `monthly_budget_usd`).
 - `net_worth_snapshots` — una fila por cuenta por fecha de corte (alimenta los gráficos de patrimonio). Único por `(account_id, snapshot_date)`.
-- `transactions` — cada consumo. `amount_native > 0` = gasto, `< 0` = pago/devolución. Flags `is_payment` (no cuenta como gasto) e `is_extraordinary` (one-off).
+- `transactions` — cada consumo. `amount_native > 0` = gasto, `< 0` = pago/devolución. Flags `is_payment` (no cuenta como gasto) e `is_extraordinary` (legacy). **Dimensiones v2** (filtrables): `country` (dónde se gastó, default `CO`), `payment_type` (heredado de la cuenta, editable), `expense_type` (`fijo | variable | extraordinario`, default `variable` — reemplaza a `is_extraordinary`).
 - `goals` — metas de ahorro.
+- `monthly_close` — un cierre por mes (`period` `YYYY-MM`, único por usuario). `status`: `pendiente | en_progreso | cerrado`. Al cerrar congela `net_worth_usd`, `total_spend_usd`, `savings_usd` y `closed_at`.
+- `monthly_close_items` — checklist de fuentes de un cierre (`close_id`). `item_type`: `extracto_pdf | saldo | gmail_auto`. `status`: `pendiente | cargado | omitido` + `loaded_at`. **El asistente externo marca `status='cargado'` y `loaded_at` a medida que ingiere cada fuente.**
 
 El SQL está documentado con `COMMENT ON` en cada tabla/columna relevante para que
 el proceso externo (asistente con MCP) sepa exactamente qué escribir. Ver
@@ -66,6 +69,29 @@ on conflict (account_id, snapshot_date) do update
       fx_rate_to_usd = excluded.fx_rate_to_usd;
 ```
 
+Al insertar transacciones, además de los campos clásicos conviene setear las
+dimensiones v2 (si se omiten, `country` y `expense_type` toman sus defaults
+`CO`/`variable`, y `payment_type` queda `null` → la app lo trata como heredable):
+
+```sql
+insert into transactions
+  (user_id, account_id, tx_date, description_raw, merchant, amount_native,
+   native_currency, fx_rate_to_usd, amount_usd, category_id,
+   country, payment_type, expense_type)
+values ('<user_uuid>', '<account_uuid>', '2026-06-15', 'RAPPI*BURGER', 'Rappi',
+        57900, 'COP', 0.00027, 15.74, '<category_uuid>',
+        'CO', 'credito', 'variable');
+```
+
+Para el **cierre mensual**, el asistente actualiza el estado de cada fuente del
+checklist a medida que la carga:
+
+```sql
+update monthly_close_items
+  set status = 'cargado', loaded_at = now()
+where close_id = '<close_uuid>' and source = 'RappiCard';
+```
+
 ## Levantar local
 
 ```bash
@@ -88,6 +114,11 @@ Las migraciones viven en `supabase/migrations/` (idempotentes, en orden):
 1. `0001_initial_schema.sql` — extensiones, enums, tablas, índices.
 2. `0002_rls_and_seed.sql` — RLS por dueño + trigger que siembra las cuentas y
    categorías por defecto cuando un usuario se registra.
+3. `0003_expense_dimensions.sql` — **aditiva**: agrega `country` / `payment_type`
+   a `accounts`, y `country` / `payment_type` / `expense_type` a `transactions`,
+   con backfill no destructivo de los datos existentes + índices de filtrado.
+4. `0004_monthly_close.sql` — **aditiva**: tablas `monthly_close` y
+   `monthly_close_items` con RLS por dueño.
 
 Aplicalas con la **Supabase CLI**:
 

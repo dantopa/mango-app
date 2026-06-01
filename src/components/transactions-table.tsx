@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, SlidersHorizontal } from "lucide-react";
 
 import {
   Table,
@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatDay, formatNative, formatUsd } from "@/lib/format";
 import { useUpdateTransaction } from "@/hooks/use-finance";
+import { COUNTRIES, EXPENSE_TYPES, PAYMENT_TYPES, expenseTypeMeta } from "@/lib/dimensions";
 import type { Category, TransactionWithRelations } from "@/lib/types";
 
 const NONE = "__none__";
@@ -39,6 +40,16 @@ export function TransactionsTable({
 }) {
   const update = useUpdateTransaction();
   const [pendingId, setPendingId] = React.useState<string | null>(null);
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function mutate(id: string, values: EditValues) {
     setPendingId(id);
@@ -103,19 +114,21 @@ export function TransactionsTable({
                   onChange={(v) => mutate(t.id, { category_id: v === NONE ? null : v })}
                 />
                 <FlagToggle
-                  active={t.is_extraordinary}
-                  label="Extra"
-                  onClick={() => mutate(t.id, { is_extraordinary: !t.is_extraordinary })}
-                />
-                <FlagToggle
                   active={t.is_payment}
                   label="Pago"
                   onClick={() => mutate(t.id, { is_payment: !t.is_payment })}
+                />
+                <ExpandToggle
+                  active={expanded.has(t.id)}
+                  onClick={() => toggleExpanded(t.id)}
                 />
                 {pendingId === t.id && (
                   <Loader2 className="size-4 animate-spin text-muted-foreground" />
                 )}
               </div>
+              {expanded.has(t.id) && (
+                <DimensionEditor t={t} onChange={(v) => mutate(t.id, v)} />
+              )}
             </li>
           );
         })}
@@ -139,7 +152,8 @@ export function TransactionsTable({
               const isCredit = t.is_payment || t.amount_usd < 0;
               const busy = pendingId === t.id;
               return (
-                <TableRow key={t.id} className={cn(busy && "opacity-60")}>
+                <React.Fragment key={t.id}>
+                <TableRow className={cn(busy && "opacity-60")}>
                   <TableCell className="whitespace-nowrap text-muted-foreground tabular-nums">
                     {formatDay(t.tx_date)}
                   </TableCell>
@@ -175,17 +189,20 @@ export function TransactionsTable({
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
-                      <FlagToggle
-                        active={t.is_extraordinary}
-                        label="Extra"
-                        onClick={() =>
-                          mutate(t.id, { is_extraordinary: !t.is_extraordinary })
-                        }
-                      />
+                      <Badge
+                        variant="muted"
+                        style={{ color: expenseTypeMeta.color(t.expense_type) }}
+                      >
+                        {expenseTypeMeta.label(t.expense_type)}
+                      </Badge>
                       <FlagToggle
                         active={t.is_payment}
                         label="Pago"
                         onClick={() => mutate(t.id, { is_payment: !t.is_payment })}
+                      />
+                      <ExpandToggle
+                        active={expanded.has(t.id)}
+                        onClick={() => toggleExpanded(t.id)}
                       />
                       {busy && (
                         <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
@@ -208,6 +225,14 @@ export function TransactionsTable({
                     )}
                   </TableCell>
                 </TableRow>
+                {expanded.has(t.id) && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={6} className="bg-secondary/20 py-3">
+                      <DimensionEditor t={t} onChange={(v) => mutate(t.id, v)} />
+                    </TableCell>
+                  </TableRow>
+                )}
+                </React.Fragment>
               );
             })}
           </TableBody>
@@ -256,6 +281,94 @@ function CategorySelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+function ExpandToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title="Editar dimensiones (tipo, país, medio de pago)"
+      className={cn(
+        "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:text-foreground",
+        active && "border-primary bg-primary/15 text-foreground",
+      )}
+    >
+      <SlidersHorizontal className="size-4" />
+    </button>
+  );
+}
+
+type EnumOption = { value: string; label: string; color?: string };
+
+function EnumSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: EnumOption[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="h-9">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              <span className="flex items-center gap-2">
+                {o.color && (
+                  <span className="size-2.5 rounded-full" style={{ background: o.color }} />
+                )}
+                {o.label}
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+/** Per-transaction editor for the v2 dimensions: tipo / país / medio de pago. */
+function DimensionEditor({
+  t,
+  onChange,
+}: {
+  t: TransactionWithRelations;
+  onChange: (values: EditValues) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 px-4 sm:grid-cols-3 sm:px-0">
+      <EnumSelect
+        label="Tipo de gasto"
+        value={t.expense_type}
+        options={EXPENSE_TYPES}
+        onChange={(v) =>
+          onChange({ expense_type: v, is_extraordinary: v === "extraordinario" } as EditValues)
+        }
+      />
+      <EnumSelect
+        label="País"
+        value={t.country}
+        options={COUNTRIES}
+        onChange={(v) => onChange({ country: v } as EditValues)}
+      />
+      <EnumSelect
+        label="Medio de pago"
+        value={t.payment_type ?? "credito"}
+        options={PAYMENT_TYPES}
+        onChange={(v) => onChange({ payment_type: v } as EditValues)}
+      />
+    </div>
   );
 }
 

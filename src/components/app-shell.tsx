@@ -8,6 +8,7 @@ import {
   Receipt,
   Wallet,
   Target,
+  CalendarCheck,
   Sparkles,
   LogOut,
 } from "lucide-react";
@@ -18,8 +19,9 @@ import { Button } from "@/components/ui/button";
 const NAV = [
   { href: "/", label: "Dashboard", short: "Inicio", icon: LayoutDashboard },
   { href: "/gastos", label: "Gastos", short: "Gastos", icon: Receipt },
-  { href: "/patrimonio", label: "Patrimonio", short: "Patrimonio", icon: Wallet },
+  { href: "/patrimonio", label: "Patrimonio", short: "Cuentas", icon: Wallet },
   { href: "/objetivos", label: "Objetivos", short: "Metas", icon: Target },
+  { href: "/cierre", label: "Cierre mensual", short: "Cierre", icon: CalendarCheck },
 ] as const;
 
 function isActive(pathname: string, href: string) {
@@ -101,7 +103,7 @@ export function AppShell({
 
       {/* Mobile bottom tab bar */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-card/95 backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-card/95 backdrop-blur md:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {NAV.map(({ href, short, icon: Icon }) => {
@@ -111,12 +113,12 @@ export function AppShell({
               key={href}
               href={href}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+                "flex min-w-0 flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
                 active ? "text-primary" : "text-muted-foreground",
               )}
             >
               <Icon className={cn("size-5", active && "scale-110 transition-transform")} />
-              {short}
+              <span className="max-w-full truncate">{short}</span>
             </Link>
           );
         })}

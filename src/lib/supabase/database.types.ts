@@ -16,29 +16,35 @@ export type Database = {
     Tables: {
       accounts: {
         Row: {
+          country: string | null
           created_at: string
           id: string
           is_active: boolean
           name: string
           native_currency: string
+          payment_type: string | null
           type: Database["public"]["Enums"]["account_type"]
           user_id: string
         }
         Insert: {
+          country?: string | null
           created_at?: string
           id?: string
           is_active?: boolean
           name: string
           native_currency: string
+          payment_type?: string | null
           type: Database["public"]["Enums"]["account_type"]
           user_id?: string
         }
         Update: {
+          country?: string | null
           created_at?: string
           id?: string
           is_active?: boolean
           name?: string
           native_currency?: string
+          payment_type?: string | null
           type?: Database["public"]["Enums"]["account_type"]
           user_id?: string
         }
@@ -118,6 +124,86 @@ export type Database = {
         }
         Relationships: []
       }
+      monthly_close: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          id: string
+          net_worth_usd: number | null
+          notes: string | null
+          period: string
+          savings_usd: number | null
+          status: string
+          total_spend_usd: number | null
+          user_id: string
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          id?: string
+          net_worth_usd?: number | null
+          notes?: string | null
+          period: string
+          savings_usd?: number | null
+          status?: string
+          total_spend_usd?: number | null
+          user_id?: string
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          id?: string
+          net_worth_usd?: number | null
+          notes?: string | null
+          period?: string
+          savings_usd?: number | null
+          status?: string
+          total_spend_usd?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      monthly_close_items: {
+        Row: {
+          close_id: string
+          created_at: string
+          id: string
+          item_type: string
+          loaded_at: string | null
+          source: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          close_id: string
+          created_at?: string
+          id?: string
+          item_type: string
+          loaded_at?: string | null
+          source: string
+          status?: string
+          user_id?: string
+        }
+        Update: {
+          close_id?: string
+          created_at?: string
+          id?: string
+          item_type?: string
+          loaded_at?: string | null
+          source?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monthly_close_items_close_id_fkey"
+            columns: ["close_id"]
+            isOneToOne: false
+            referencedRelation: "monthly_close"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       net_worth_snapshots: {
         Row: {
           account_id: string
@@ -174,8 +260,10 @@ export type Database = {
           amount_native: number
           amount_usd: number
           category_id: string | null
+          country: string
           created_at: string
           description_raw: string
+          expense_type: string
           fx_rate_to_usd: number
           id: string
           installments: string | null
@@ -183,6 +271,7 @@ export type Database = {
           is_payment: boolean
           merchant: string | null
           native_currency: string
+          payment_type: string | null
           statement_period: string | null
           tx_date: string
           user_id: string
@@ -192,8 +281,10 @@ export type Database = {
           amount_native: number
           amount_usd: number
           category_id?: string | null
+          country?: string
           created_at?: string
           description_raw: string
+          expense_type?: string
           fx_rate_to_usd: number
           id?: string
           installments?: string | null
@@ -201,6 +292,7 @@ export type Database = {
           is_payment?: boolean
           merchant?: string | null
           native_currency: string
+          payment_type?: string | null
           statement_period?: string | null
           tx_date: string
           user_id?: string
@@ -210,8 +302,10 @@ export type Database = {
           amount_native?: number
           amount_usd?: number
           category_id?: string | null
+          country?: string
           created_at?: string
           description_raw?: string
+          expense_type?: string
           fx_rate_to_usd?: number
           id?: string
           installments?: string | null
@@ -219,6 +313,7 @@ export type Database = {
           is_payment?: boolean
           merchant?: string | null
           native_currency?: string
+          payment_type?: string | null
           statement_period?: string | null
           tx_date?: string
           user_id?: string

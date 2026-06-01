@@ -11,9 +11,9 @@ import {
 } from "recharts";
 
 import { MoneyTooltip } from "./chart-tooltip";
-import type { CategorySpend } from "@/lib/analytics";
+import type { Sliceable } from "./category-pie-chart";
 
-export function CategoryBarChart({ data }: { data: CategorySpend[] }) {
+export function CategoryBarChart({ data }: { data: Sliceable[] }) {
   return (
     <ResponsiveContainer width="100%" height={Math.max(220, data.length * 38)}>
       <BarChart

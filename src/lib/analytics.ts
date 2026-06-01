@@ -4,6 +4,12 @@ import type {
   NetWorthSnapshot,
   TransactionWithRelations,
 } from "./types";
+import {
+  countryMeta,
+  expenseTypeMeta,
+  paymentMeta,
+  type ExpenseType,
+} from "./dimensions";
 
 // ---------------------------------------------------------------------------
 // Net worth
@@ -265,6 +271,183 @@ export function previousMonthKey(monthKey: string): string {
   const [y, m] = monthKey.split("-").map(Number);
   const d = new Date(y, m - 2, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Faceted filtering & dimension breakdowns (v2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Combinable facet filters. Each set is AND-combined; an empty set means "no
+ * filter on this dimension". `search` matches merchant or raw description.
+ */
+export type SpendFilters = {
+  accountIds: Set<string>;
+  countries: Set<string>;
+  paymentTypes: Set<string>;
+  expenseTypes: Set<string>;
+  categoryIds: Set<string>;
+  search: string;
+};
+
+export function emptyFilters(): SpendFilters {
+  return {
+    accountIds: new Set(),
+    countries: new Set(),
+    paymentTypes: new Set(),
+    expenseTypes: new Set(),
+    categoryIds: new Set(),
+    search: "",
+  };
+}
+
+export function filtersActive(f: SpendFilters): number {
+  return (
+    f.accountIds.size +
+    f.countries.size +
+    f.paymentTypes.size +
+    f.expenseTypes.size +
+    f.categoryIds.size +
+    (f.search.trim() ? 1 : 0)
+  );
+}
+
+export function applyFilters(
+  txns: TransactionWithRelations[],
+  f: SpendFilters,
+): TransactionWithRelations[] {
+  const q = f.search.trim().toLowerCase();
+  return txns.filter((t) => {
+    if (f.accountIds.size && !f.accountIds.has(t.account_id)) return false;
+    if (f.countries.size && !f.countries.has(t.country)) return false;
+    if (f.paymentTypes.size && !f.paymentTypes.has(t.payment_type ?? "")) return false;
+    if (f.expenseTypes.size && !f.expenseTypes.has(t.expense_type)) return false;
+    if (f.categoryIds.size && !f.categoryIds.has(t.category?.id ?? "")) return false;
+    if (q) {
+      const hay = `${t.merchant ?? ""} ${t.description_raw}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+export type DimensionSlice = {
+  key: string;
+  name: string;
+  color: string;
+  total: number;
+  count: number;
+};
+
+/** Generic spend breakdown over expenses, grouped by an arbitrary key. */
+function spendBy(
+  txns: TransactionWithRelations[],
+  keyOf: (t: TransactionWithRelations) => string,
+  nameOf: (key: string) => string,
+  colorOf: (key: string) => string,
+): DimensionSlice[] {
+  const acc = new Map<string, DimensionSlice>();
+  for (const t of txns) {
+    if (!isExpense(t)) continue;
+    const key = keyOf(t);
+    const existing =
+      acc.get(key) ??
+      { key, name: nameOf(key), color: colorOf(key), total: 0, count: 0 };
+    existing.total += t.amount_usd;
+    existing.count += 1;
+    acc.set(key, existing);
+  }
+  return [...acc.values()].sort((a, b) => b.total - a.total);
+}
+
+/** Spend split fijo / variable / extraordinario. */
+export function spendByExpenseType(txns: TransactionWithRelations[]): DimensionSlice[] {
+  return spendBy(
+    txns,
+    (t) => t.expense_type,
+    (k) => expenseTypeMeta.label(k),
+    (k) => expenseTypeMeta.color(k),
+  );
+}
+
+/** Spend grouped by country where the expense happened. */
+export function spendByCountry(txns: TransactionWithRelations[]): DimensionSlice[] {
+  return spendBy(
+    txns,
+    (t) => t.country,
+    (k) => countryMeta.label(k),
+    (k) => countryMeta.color(k),
+  );
+}
+
+/** Spend grouped by payment medium. */
+export function spendByPaymentType(txns: TransactionWithRelations[]): DimensionSlice[] {
+  return spendBy(
+    txns,
+    (t) => t.payment_type ?? "",
+    (k) => paymentMeta.label(k),
+    (k) => paymentMeta.color(k),
+  );
+}
+
+const ACCOUNT_PALETTE = [
+  "#8b5cf6", "#22c55e", "#f97316", "#3b82f6", "#ec4899",
+  "#eab308", "#06b6d4", "#ef4444", "#14b8a6", "#a16207",
+];
+
+/** Spend grouped by account/card (ranking). Colors are name-stable. */
+export function spendByAccount(txns: TransactionWithRelations[]): DimensionSlice[] {
+  const names = [...new Set(txns.map((t) => t.account?.name ?? "—"))].sort();
+  const colorByName = new Map(names.map((n, i) => [n, ACCOUNT_PALETTE[i % ACCOUNT_PALETTE.length]]));
+  return spendBy(
+    txns,
+    (t) => t.account?.name ?? "—",
+    (k) => k,
+    (k) => colorByName.get(k) ?? "#52525b",
+  );
+}
+
+export type CostOfLiving = {
+  fixed: number;
+  variableAvg: number;
+  total: number;
+  monthsAveraged: number;
+};
+
+/**
+ * Monthly cost of living = current-month FIXED spend + average VARIABLE spend
+ * over the last up-to-3 months. Extraordinary one-offs are excluded by design.
+ */
+export function costOfLiving(
+  allTxns: TransactionWithRelations[],
+  currentMonthKey: string,
+): CostOfLiving {
+  const sumByType = (set: TransactionWithRelations[], type: ExpenseType) =>
+    set.reduce(
+      (s, t) => (isExpense(t) && t.expense_type === type ? s + t.amount_usd : s),
+      0,
+    );
+
+  const fixed = sumByType(filterByMonth(allTxns, currentMonthKey), "fijo");
+
+  // Average variable over the most recent months that have data (incl. current).
+  const months = monthsPresent(allTxns)
+    .filter((m) => m <= currentMonthKey)
+    .slice(0, 3);
+  const variableTotals = months.map((m) =>
+    sumByType(filterByMonth(allTxns, m), "variable"),
+  );
+  const variableAvg =
+    variableTotals.length > 0
+      ? variableTotals.reduce((a, b) => a + b, 0) / variableTotals.length
+      : 0;
+
+  return {
+    fixed,
+    variableAvg,
+    total: fixed + variableAvg,
+    monthsAveraged: months.length,
+  };
 }
 
 // ---------------------------------------------------------------------------

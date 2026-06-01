@@ -4,9 +4,11 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import { formatUsd } from "@/lib/format";
 import { MoneyTooltip } from "./chart-tooltip";
-import type { CategorySpend } from "@/lib/analytics";
 
-export function CategoryPieChart({ data }: { data: CategorySpend[] }) {
+/** Minimal shape both CategorySpend and DimensionSlice satisfy. */
+export type Sliceable = { name: string; color: string; total: number };
+
+export function CategoryPieChart({ data }: { data: Sliceable[] }) {
   const chartData = data.map((d) => ({ name: d.name, value: d.total, color: d.color }));
   const total = data.reduce((s, d) => s + d.total, 0);
 

@@ -7,6 +7,7 @@ import type {
   Account,
   Category,
   Goal,
+  MonthlyCloseWithItems,
   NetWorthSnapshot,
   TransactionWithRelations,
 } from "@/lib/types";
@@ -20,7 +21,20 @@ export const queryKeys = {
   snapshots: ["snapshots"] as const,
   transactions: ["transactions"] as const,
   goals: ["goals"] as const,
+  monthlyCloses: ["monthly_closes"] as const,
 };
+
+/** The fixed source catalog seeded into every new monthly close. */
+export const DEFAULT_CLOSE_SOURCES: { source: string; item_type: string }[] = [
+  { source: "RappiCard", item_type: "extracto_pdf" },
+  { source: "BBVA Visa", item_type: "extracto_pdf" },
+  { source: "BBVA Mastercard", item_type: "extracto_pdf" },
+  { source: "Bancolombia", item_type: "gmail_auto" },
+  { source: "Arriendo", item_type: "gmail_auto" },
+  { source: "Nexo saldo", item_type: "saldo" },
+  { source: "IBKR saldo", item_type: "saldo" },
+  { source: "Wise saldo", item_type: "saldo" },
+];
 
 export function useAccounts() {
   return useQuery({
@@ -142,5 +156,96 @@ export function useDeleteGoal() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.goals }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Monthly close
+// ---------------------------------------------------------------------------
+
+export function useMonthlyCloses() {
+  return useQuery({
+    queryKey: queryKeys.monthlyCloses,
+    queryFn: async (): Promise<MonthlyCloseWithItems[]> => {
+      const { data, error } = await supabase
+        .from("monthly_close")
+        .select("*, items:monthly_close_items(*)")
+        .order("period", { ascending: false });
+      if (error) throw error;
+      // Stable ordering of the checklist (insertion order via created_at).
+      return (data as unknown as MonthlyCloseWithItems[]).map((c) => ({
+        ...c,
+        items: [...c.items].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      }));
+    },
+  });
+}
+
+/** Creates the close for a period and seeds the default source checklist. */
+export function useCreateMonthlyClose() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (period: string) => {
+      const user_id = await getUserId();
+      const { data: close, error } = await supabase
+        .from("monthly_close")
+        .insert({ period, user_id, status: "en_progreso" })
+        .select()
+        .single();
+      if (error) throw error;
+
+      const items = DEFAULT_CLOSE_SOURCES.map((s) => ({
+        ...s,
+        close_id: close.id,
+        user_id,
+      }));
+      const { error: itemsError } = await supabase
+        .from("monthly_close_items")
+        .insert(items);
+      if (itemsError) throw itemsError;
+      return close;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.monthlyCloses }),
+  });
+}
+
+export function useUpdateCloseItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const { error } = await supabase
+        .from("monthly_close_items")
+        .update({
+          status,
+          loaded_at: status === "cargado" ? new Date().toISOString() : null,
+        })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.monthlyCloses }),
+  });
+}
+
+export function useUpdateClose() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      values,
+    }: {
+      id: string;
+      values: Partial<{
+        status: string;
+        closed_at: string | null;
+        net_worth_usd: number | null;
+        total_spend_usd: number | null;
+        savings_usd: number | null;
+        notes: string | null;
+      }>;
+    }) => {
+      const { error } = await supabase.from("monthly_close").update(values).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.monthlyCloses }),
   });
 }

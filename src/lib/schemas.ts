@@ -22,6 +22,17 @@ export const transactionEditSchema = z.object({
   category_id: z.string().uuid().nullable(),
   is_extraordinary: z.boolean(),
   is_payment: z.boolean(),
+  country: z.enum(["AR", "CO", "US", "global"]),
+  payment_type: z.enum([
+    "credito",
+    "debito",
+    "transferencia",
+    "pse_qr",
+    "efectivo",
+    "inversion",
+    "wallet",
+  ]),
+  expense_type: z.enum(["fijo", "variable", "extraordinario"]),
 });
 
 export type TransactionEditValues = z.infer<typeof transactionEditSchema>;

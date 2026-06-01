@@ -1,27 +1,39 @@
 "use client";
 
 import * as React from "react";
-import { Bike, Car, Receipt, Sparkle } from "lucide-react";
+import { Bike, Car, Filter, Receipt, Sparkle, X } from "lucide-react";
 
 import { useAccounts, useCategories, useTransactions } from "@/hooks/use-finance";
 import {
+  applyFilters,
   categoryComparison,
+  costOfLiving,
   daysInMonthKey,
+  emptyFilters,
   filterByMonth,
+  filtersActive,
   monthsPresent,
   previousMonthKey,
-  spendPatterns,
+  spendByAccount,
+  spendByCountry,
+  spendByExpenseType,
   spendingByCategory,
+  spendPatterns,
   totalSpend,
+  type SpendFilters,
 } from "@/lib/analytics";
+import { EXPENSE_TYPES, countryMeta, paymentMeta } from "@/lib/dimensions";
 import { formatMonth, formatUsd } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
+import { CostOfLivingCard } from "@/components/cost-of-living-card";
 import { ChangeIndicator } from "@/components/change-indicator";
+import { FilterChips, type ChipOption } from "@/components/filter-chips";
 import { LoadingState, ErrorState, EmptyState } from "@/components/states";
 import { TransactionsTable } from "@/components/transactions-table";
 import { CategoryPieChart } from "@/components/charts/category-pie-chart";
 import { CategoryBarChart } from "@/components/charts/category-bar-chart";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -39,9 +51,8 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
-const ALL = "__all__";
+type FacetKey = keyof Omit<SpendFilters, "search">;
 
 export default function GastosPage() {
   const txns = useTransactions();
@@ -50,9 +61,7 @@ export default function GastosPage() {
 
   const [month, setMonth] = React.useState<string | null>(null);
   const [excludeExtra, setExcludeExtra] = React.useState(false);
-  const [accountFilter, setAccountFilter] = React.useState(ALL);
-  const [categoryFilter, setCategoryFilter] = React.useState(ALL);
-  const [search, setSearch] = React.useState("");
+  const [filters, setFilters] = React.useState<SpendFilters>(emptyFilters);
 
   const months = React.useMemo(
     () => (txns.data ? monthsPresent(txns.data) : []),
@@ -60,38 +69,68 @@ export default function GastosPage() {
   );
   const selectedMonth = month ?? months[0] ?? null;
 
+  function toggleFacet(key: FacetKey, value: string) {
+    setFilters((prev) => {
+      const next = new Set(prev[key]);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return { ...prev, [key]: next };
+    });
+  }
+
   const view = React.useMemo(() => {
     if (!txns.data || !selectedMonth) return null;
     const monthTxns = filterByMonth(txns.data, selectedMonth);
     const prevTxns = filterByMonth(txns.data, previousMonthKey(selectedMonth));
 
-    const opts = { excludeExtraordinary: excludeExtra };
-    const byCategory = spendingByCategory(monthTxns, opts);
-    const total = totalSpend(monthTxns, opts);
-    const totalWithExtra = totalSpend(monthTxns);
-    const comparison = categoryComparison(monthTxns, prevTxns, opts);
-    const patterns = spendPatterns(monthTxns, daysInMonthKey(selectedMonth));
+    const dropExtra = (set: typeof monthTxns) =>
+      excludeExtra ? set.filter((t) => t.expense_type !== "extraordinario") : set;
 
-    const filtered = monthTxns.filter((t) => {
-      if (accountFilter !== ALL && t.account_id !== accountFilter) return false;
-      if (categoryFilter !== ALL && (t.category?.id ?? "") !== categoryFilter) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        const hay = `${t.merchant ?? ""} ${t.description_raw}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
+    const filtered = dropExtra(applyFilters(monthTxns, filters));
+    const prevFiltered = dropExtra(applyFilters(prevTxns, filters));
 
     return {
-      byCategory,
-      total,
-      extraordinary: totalWithExtra - total,
-      comparison,
-      patterns,
+      monthTxns,
       filtered,
+      total: totalSpend(filtered),
+      extraordinary: totalSpend(monthTxns) - totalSpend(monthTxns.filter((t) => t.expense_type !== "extraordinario")),
+      byCategory: spendingByCategory(filtered),
+      comparison: categoryComparison(filtered, prevFiltered),
+      byExpenseType: spendByExpenseType(filtered),
+      byCountry: spendByCountry(filtered),
+      byAccount: spendByAccount(filtered),
+      patterns: spendPatterns(filtered, daysInMonthKey(selectedMonth)),
+      cost: costOfLiving(txns.data, selectedMonth),
     };
-  }, [txns.data, selectedMonth, excludeExtra, accountFilter, categoryFilter, search]);
+  }, [txns.data, selectedMonth, excludeExtra, filters]);
+
+  // Facet options derived from the month's data (so no dead chips appear).
+  const facetOptions = React.useMemo(() => {
+    const set = view?.monthTxns ?? [];
+    const present = <T,>(arr: T[]) => [...new Set(arr)];
+
+    const accountOpts: ChipOption[] = present(set.map((t) => t.account_id)).map((id) => ({
+      value: id,
+      label: set.find((t) => t.account_id === id)?.account?.name ?? "—",
+    }));
+    const categoryOpts: ChipOption[] = present(
+      set.filter((t) => t.category).map((t) => t.category!.id),
+    ).map((id) => {
+      const c = set.find((t) => t.category?.id === id)?.category;
+      return { value: id, label: c?.name ?? "—", color: c?.color };
+    });
+    const countryOpts: ChipOption[] = present(set.map((t) => t.country)).map((c) => ({
+      value: c,
+      label: countryMeta.label(c),
+      color: countryMeta.color(c),
+    }));
+    const paymentOpts: ChipOption[] = present(set.map((t) => t.payment_type ?? "")).map((p) => ({
+      value: p,
+      label: paymentMeta.label(p),
+      color: paymentMeta.color(p),
+    }));
+    return { accountOpts, categoryOpts, countryOpts, paymentOpts };
+  }, [view?.monthTxns]);
 
   if (txns.isLoading || accounts.isLoading || categories.isLoading)
     return <LoadingState />;
@@ -108,11 +147,18 @@ export default function GastosPage() {
     );
   }
 
+  const activeCount = filtersActive(filters);
+  const expenseTypeOpts: ChipOption[] = EXPENSE_TYPES.map((o) => ({
+    value: o.value,
+    label: o.label,
+    color: o.color,
+  }));
+
   return (
     <>
       <PageHeader
         title="Gastos"
-        description="Análisis de tus consumos por período y categoría."
+        description="Análisis de tus consumos por período y dimensión."
         action={
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
             <label className="flex items-center justify-between gap-2 text-sm text-muted-foreground sm:justify-start">
@@ -143,7 +189,9 @@ export default function GastosPage() {
           hint={
             excludeExtra && view.extraordinary > 0
               ? `+ ${formatUsd(view.extraordinary)} extraordinarios`
-              : "vida normal"
+              : activeCount > 0
+                ? "con filtros aplicados"
+                : "vida normal"
           }
           icon={<Receipt className="size-4" />}
         />
@@ -167,8 +215,81 @@ export default function GastosPage() {
         />
       </div>
 
+      {/* Cost of living */}
+      <div className="mt-4">
+        <CostOfLivingCard data={view.cost} />
+      </div>
+
+      {/* Faceted filters */}
+      <Card className="mt-4">
+        <CardHeader className="gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Filter className="size-4 text-muted-foreground" />
+              Filtros
+            </CardTitle>
+            {activeCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-muted-foreground"
+                onClick={() => setFilters(emptyFilters())}
+              >
+                <X className="size-3.5" />
+                Limpiar ({activeCount})
+              </Button>
+            )}
+          </div>
+          <Input
+            placeholder="Buscar comercio o descripción…"
+            value={filters.search}
+            onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
+          />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <FilterChips
+            label="Tipo de gasto"
+            options={expenseTypeOpts}
+            selected={filters.expenseTypes}
+            onToggle={(v) => toggleFacet("expenseTypes", v)}
+          />
+          {facetOptions.categoryOpts.length > 1 && (
+            <FilterChips
+              label="Categoría"
+              options={facetOptions.categoryOpts}
+              selected={filters.categoryIds}
+              onToggle={(v) => toggleFacet("categoryIds", v)}
+            />
+          )}
+          {facetOptions.accountOpts.length > 1 && (
+            <FilterChips
+              label="Cuenta / tarjeta"
+              options={facetOptions.accountOpts}
+              selected={filters.accountIds}
+              onToggle={(v) => toggleFacet("accountIds", v)}
+            />
+          )}
+          {facetOptions.countryOpts.length > 1 && (
+            <FilterChips
+              label="País"
+              options={facetOptions.countryOpts}
+              selected={filters.countries}
+              onToggle={(v) => toggleFacet("countries", v)}
+            />
+          )}
+          {facetOptions.paymentOpts.length > 1 && (
+            <FilterChips
+              label="Medio de pago"
+              options={facetOptions.paymentOpts}
+              selected={filters.paymentTypes}
+              onToggle={(v) => toggleFacet("paymentTypes", v)}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Category + month-over-month */}
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        {/* Distribution */}
         <Card className="min-w-0">
           <CardHeader className="flex-row items-center justify-between">
             <div>
@@ -178,9 +299,7 @@ export default function GastosPage() {
           </CardHeader>
           <CardContent>
             {view.byCategory.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                Sin gastos en el período.
-              </p>
+              <EmptyChart />
             ) : (
               <Tabs defaultValue="torta">
                 <TabsList>
@@ -189,7 +308,7 @@ export default function GastosPage() {
                 </TabsList>
                 <TabsContent value="torta">
                   <CategoryPieChart data={view.byCategory} />
-                  <CategoryLegend data={view.byCategory} />
+                  <Legend data={view.byCategory} />
                 </TabsContent>
                 <TabsContent value="barras">
                   <CategoryBarChart data={view.byCategory} />
@@ -199,7 +318,6 @@ export default function GastosPage() {
           </CardContent>
         </Card>
 
-        {/* Month over month */}
         <Card className="min-w-0">
           <CardHeader>
             <CardTitle>Comparación vs mes anterior</CardTitle>
@@ -223,10 +341,7 @@ export default function GastosPage() {
                     className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-secondary/40"
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                      <span
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ background: c.color }}
-                      />
+                      <span className="size-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
                       <span className="truncate">{c.name}</span>
                     </span>
                     <div className="flex shrink-0 items-center gap-3">
@@ -246,56 +361,54 @@ export default function GastosPage() {
         </Card>
       </div>
 
+      {/* Dimension breakdowns */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle className="text-base">Fijo vs variable vs extraordinario</CardTitle>
+            <CardDescription>Costo de vida inevitable vs discrecional.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {view.byExpenseType.length === 0 ? (
+              <EmptyChart />
+            ) : (
+              <>
+                <CategoryPieChart data={view.byExpenseType} />
+                <Legend data={view.byExpenseType} />
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle className="text-base">Gasto por país</CardTitle>
+            <CardDescription>Dónde se fue la plata.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {view.byCountry.length === 0 ? <EmptyChart /> : <CategoryBarChart data={view.byCountry} />}
+          </CardContent>
+        </Card>
+
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle className="text-base">Gasto por cuenta</CardTitle>
+            <CardDescription>Ranking de tarjetas / cuentas.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {view.byAccount.length === 0 ? <EmptyChart /> : <CategoryBarChart data={view.byAccount} />}
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Transactions */}
       <Card className="mt-4">
-        <CardHeader className="gap-3">
+        <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardTitle>Transacciones</CardTitle>
             <span className="text-sm text-muted-foreground">
               {view.filtered.length} resultados
             </span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">Buscar</Label>
-              <Input
-                placeholder="Comercio o descripción…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">Cuenta</Label>
-              <Select value={accountFilter} onValueChange={setAccountFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Todas</SelectItem>
-                  {accounts.data?.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">Categoría</Label>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Todas</SelectItem>
-                  {categories.data?.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </CardHeader>
         <CardContent className="px-0 pb-0">
@@ -309,7 +422,15 @@ export default function GastosPage() {
   );
 }
 
-function CategoryLegend({
+function EmptyChart() {
+  return (
+    <p className="py-10 text-center text-sm text-muted-foreground">
+      Sin gastos para este filtro.
+    </p>
+  );
+}
+
+function Legend({
   data,
 }: {
   data: { name: string; color: string; total: number }[];
