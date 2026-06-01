@@ -43,7 +43,7 @@ export function ChangeIndicator({
     >
       <Icon className="size-4 shrink-0" />
       {compact ? (
-        changePct !== null ? formatPercent(Math.abs(changePct)) : formatUsd(Math.abs(changeAbs), { compact: true })
+        changePct !== null ? formatPercent(Math.abs(changePct)) : "nuevo"
       ) : (
         <>
           {formatUsd(Math.abs(changeAbs), { compact: Math.abs(changeAbs) >= 10000 })}

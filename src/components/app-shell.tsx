@@ -123,7 +123,7 @@ export function AppShell({
       </nav>
 
       {/* Content */}
-      <main className="flex-1 md:pl-60">
+      <main className="min-w-0 flex-1 md:pl-60">
         <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-[4.5rem] md:px-8 md:pb-16 md:pt-8">
           {children}
         </div>

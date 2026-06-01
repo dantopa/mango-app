@@ -99,7 +99,7 @@ export function TransactionsTable({
                   color={t.category?.color}
                   name={t.category?.name}
                   categories={categories}
-                  className="h-9 flex-1"
+                  className="h-9 min-w-0 flex-1"
                   onChange={(v) => mutate(t.id, { category_id: v === NONE ? null : v })}
                 />
                 <FlagToggle
