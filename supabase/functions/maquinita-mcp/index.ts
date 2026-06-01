@@ -25,7 +25,7 @@ const OWNER_USER_ID =
 const SECRET =
   Deno.env.get("MAQUINITA_MCP_SECRET") ?? "mqnt_3f9aK7Qe2hV8sLpZ1xR6yTbN4wD0cJ5";
 
-const SERVER_INFO = { name: "maquinita-mcp", version: "1.0.0" };
+const SERVER_INFO = { name: "maquinita-mcp", version: "1.1.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 const supabase = createClient(
@@ -44,6 +44,30 @@ const CORS = {
 
 const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
 
+/** Fixed source catalog seeded into every new monthly close (mirrors the app). */
+const DEFAULT_CLOSE_SOURCES = [
+  { source: "RappiCard", item_type: "extracto_pdf" },
+  { source: "BBVA Visa", item_type: "extracto_pdf" },
+  { source: "BBVA Mastercard", item_type: "extracto_pdf" },
+  { source: "Bancolombia", item_type: "gmail_auto" },
+  { source: "Arriendo", item_type: "gmail_auto" },
+  { source: "Nexo saldo", item_type: "saldo" },
+  { source: "IBKR saldo", item_type: "saldo" },
+  { source: "Wise saldo", item_type: "saldo" },
+];
+
+/** Resolve the monthly_close for a period (YYYY-MM), or null. */
+async function findClose(period: string) {
+  const { data, error } = await supabase
+    .from("monthly_close")
+    .select("*, items:monthly_close_items(*)")
+    .eq("user_id", OWNER_USER_ID)
+    .eq("period", period)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 function usdFor(amountNative: number, fx: number, amountUsd?: number): number {
   return amountUsd != null ? amountUsd : round4(amountNative * fx);
 }
@@ -58,17 +82,29 @@ function defaultFx(currency: string, fx?: number): number {
 async function resolveAccount(args: {
   account_id?: string;
   account_name?: string;
-}): Promise<{ id: string; native_currency: string }> {
+}): Promise<{
+  id: string;
+  native_currency: string;
+  country: string | null;
+  payment_type: string | null;
+}> {
   const { data, error } = await supabase
     .from("accounts")
-    .select("id, name, native_currency")
+    .select("id, name, native_currency, country, payment_type")
     .eq("user_id", OWNER_USER_ID);
   if (error) throw new Error(error.message);
+
+  const pick = (a: typeof data[number]) => ({
+    id: a.id,
+    native_currency: a.native_currency,
+    country: a.country,
+    payment_type: a.payment_type,
+  });
 
   if (args.account_id) {
     const a = data.find((x) => x.id === args.account_id);
     if (!a) throw new Error(`account_id no encontrado: ${args.account_id}`);
-    return { id: a.id, native_currency: a.native_currency };
+    return pick(a);
   }
   if (args.account_name) {
     const a = data.find(
@@ -81,7 +117,7 @@ async function resolveAccount(args: {
           .join(", ")}`,
       );
     }
-    return { id: a.id, native_currency: a.native_currency };
+    return pick(a);
   }
   throw new Error("Indicá account_id o account_name");
 }
@@ -116,6 +152,7 @@ async function buildTransactionRow(t: any) {
   const currency = t.native_currency ?? account.native_currency;
   const fx = defaultFx(currency, t.fx_rate_to_usd);
   const category_id = await resolveCategory(t);
+  const isExtraordinary = t.is_extraordinary ?? t.expense_type === "extraordinario";
   return {
     user_id: OWNER_USER_ID,
     account_id: account.id,
@@ -128,9 +165,13 @@ async function buildTransactionRow(t: any) {
     amount_usd: usdFor(t.amount_native, fx, t.amount_usd),
     category_id,
     is_payment: t.is_payment ?? false,
-    is_extraordinary: t.is_extraordinary ?? false,
+    is_extraordinary: isExtraordinary,
     installments: t.installments ?? null,
     statement_period: t.statement_period ?? null,
+    // v2 dimensions: inherit from the account when not provided.
+    country: t.country ?? account.country ?? "CO",
+    payment_type: t.payment_type ?? account.payment_type ?? null,
+    expense_type: t.expense_type ?? (isExtraordinary ? "extraordinario" : "variable"),
   };
 }
 
@@ -141,7 +182,7 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
   async leer_cuentas() {
     const { data, error } = await supabase
       .from("accounts")
-      .select("id, name, type, native_currency, is_active")
+      .select("id, name, type, native_currency, country, payment_type, is_active")
       .eq("user_id", OWNER_USER_ID)
       .order("name");
     if (error) throw new Error(error.message);
@@ -249,6 +290,87 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
         .sort((a, b) => b.usd - a.usd),
     };
   },
+
+  // --- Monthly close ---------------------------------------------------------
+
+  async leer_cierre(args) {
+    const period: string = args?.period ?? new Date().toISOString().slice(0, 7);
+    const close = await findClose(period);
+    if (!close) return { period, exists: false };
+    return { period, exists: true, close };
+  },
+
+  async crear_cierre(args) {
+    const period: string = args?.period ?? new Date().toISOString().slice(0, 7);
+    const existing = await findClose(period);
+    if (existing) return { ok: true, created: false, close: existing };
+
+    const { data: close, error } = await supabase
+      .from("monthly_close")
+      .insert({ user_id: OWNER_USER_ID, period, status: "en_progreso" })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+
+    const items = DEFAULT_CLOSE_SOURCES.map((s) => ({
+      ...s,
+      close_id: close.id,
+      user_id: OWNER_USER_ID,
+    }));
+    const { error: itemsError } = await supabase
+      .from("monthly_close_items")
+      .insert(items);
+    if (itemsError) throw new Error(itemsError.message);
+    return { ok: true, created: true, close, items: items.length };
+  },
+
+  async actualizar_item_cierre(args) {
+    const status: string = args.status ?? "cargado";
+    if (!["pendiente", "cargado", "omitido"].includes(status)) {
+      throw new Error("status debe ser pendiente | cargado | omitido");
+    }
+    const patch = {
+      status,
+      loaded_at: status === "cargado" ? new Date().toISOString() : null,
+    };
+
+    let q = supabase.from("monthly_close_items").update(patch).eq("user_id", OWNER_USER_ID);
+    if (args.item_id) {
+      q = q.eq("id", args.item_id);
+    } else if (args.period && args.source) {
+      const close = await findClose(args.period);
+      if (!close) throw new Error(`No hay cierre para ${args.period}`);
+      q = q.eq("close_id", close.id).eq("source", args.source);
+    } else {
+      throw new Error("Indicá item_id, o bien period + source");
+    }
+    const { data, error } = await q.select("id, source, status, loaded_at");
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) throw new Error("No se encontró el item");
+    return { ok: true, updated: data };
+  },
+
+  async cerrar_mes(args) {
+    if (!args.period) throw new Error("Falta period (YYYY-MM)");
+    const close = await findClose(args.period);
+    if (!close) throw new Error(`No hay cierre para ${args.period}`);
+    const { data, error } = await supabase
+      .from("monthly_close")
+      .update({
+        status: "cerrado",
+        closed_at: new Date().toISOString(),
+        net_worth_usd: args.net_worth_usd ?? null,
+        total_spend_usd: args.total_spend_usd ?? null,
+        savings_usd: args.savings_usd ?? null,
+        notes: args.notes ?? close.notes ?? null,
+      })
+      .eq("id", close.id)
+      .eq("user_id", OWNER_USER_ID)
+      .select("id, period, status, closed_at, net_worth_usd")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, close: data };
+  },
 };
 
 // --- Tool schemas (advertised via tools/list) --------------------------------
@@ -276,15 +398,27 @@ const txProps = {
   fx_rate_to_usd: { type: "number", description: "Tipo de cambio native→USD. Default 1 para USD/USDT." },
   amount_usd: { type: "number", description: "Opcional; si se omite se calcula amount_native*fx." },
   is_payment: { type: "boolean", description: "true para pagos de tarjeta/devoluciones (no cuenta como gasto)." },
-  is_extraordinary: { type: "boolean", description: "true para gastos one-off (pasajes, electrodomésticos)." },
+  is_extraordinary: { type: "boolean", description: "(legacy) true para one-offs. Preferí expense_type='extraordinario'." },
   installments: { type: "string", description: "ej '1 de 1', '3 de 6'." },
   statement_period: { type: "string", description: "ej '2026-04-30 a 2026-05-28'." },
+  country: {
+    type: "string",
+    description: "Dónde se hizo el gasto: AR | CO | US | global. Si se omite hereda el país de la cuenta (o CO).",
+  },
+  payment_type: {
+    type: "string",
+    description: "Medio de pago: credito | debito | transferencia | pse_qr | efectivo | inversion | wallet. Si se omite hereda el de la cuenta.",
+  },
+  expense_type: {
+    type: "string",
+    description: "Naturaleza del gasto: fijo (arriendo, prepaga, suscripciones) | variable (delivery, transporte, salidas) | extraordinario (one-offs). Default variable.",
+  },
 };
 
 const TOOLS = [
   {
     name: "leer_cuentas",
-    description: "Lista las cuentas del dueño (id, nombre, tipo, moneda). Usalo para resolver nombre→id.",
+    description: "Lista las cuentas del dueño (id, nombre, tipo, moneda, país, medio de pago). Usalo para resolver nombre→id.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -295,7 +429,7 @@ const TOOLS = [
   {
     name: "registrar_transaccion",
     description:
-      "Inserta un consumo individual de un extracto. Calcula amount_usd si no se pasa. Stampa el user_id del dueño.",
+      "Inserta un consumo individual de un extracto. Calcula amount_usd si no se pasa. Stampa el user_id del dueño. Acepta dimensiones country/payment_type/expense_type (heredan de la cuenta si se omiten).",
     inputSchema: {
       type: "object",
       properties: txProps,
@@ -348,6 +482,54 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { month: { type: "string", description: "Mes YYYY-MM. Opcional." } },
+    },
+  },
+  {
+    name: "leer_cierre",
+    description:
+      "Lee el cierre mensual de un período (YYYY-MM; sin período = mes actual) con su checklist de fuentes. Usalo para ver qué falta cargar.",
+    inputSchema: {
+      type: "object",
+      properties: { period: { type: "string", description: "Período YYYY-MM. Opcional (default mes actual)." } },
+    },
+  },
+  {
+    name: "crear_cierre",
+    description:
+      "Abre el cierre de un período y siembra el checklist de 8 fuentes (RappiCard, BBVA Visa/Mastercard, Bancolombia, Arriendo, Nexo/IBKR/Wise saldo). Idempotente: si ya existe lo devuelve.",
+    inputSchema: {
+      type: "object",
+      properties: { period: { type: "string", description: "Período YYYY-MM. Opcional (default mes actual)." } },
+    },
+  },
+  {
+    name: "actualizar_item_cierre",
+    description:
+      "Marca una fuente del checklist como cargada/omitida/pendiente. Identificá el item por item_id, o por period + source (ej period='2026-06', source='RappiCard').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        item_id: { type: "string", description: "ID del item (alternativa a period+source)." },
+        period: { type: "string", description: "Período YYYY-MM (con source)." },
+        source: { type: "string", description: "Nombre de la fuente, ej 'RappiCard'." },
+        status: { type: "string", description: "cargado | omitido | pendiente. Default cargado." },
+      },
+    },
+  },
+  {
+    name: "cerrar_mes",
+    description:
+      "Cierra el mes (status=cerrado) y congela el snapshot. Pasá net_worth_usd / total_spend_usd / savings_usd si los calculaste.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        period: { type: "string", description: "Período YYYY-MM." },
+        net_worth_usd: { type: "number", description: "Patrimonio neto del cierre (opcional)." },
+        total_spend_usd: { type: "number", description: "Gasto total del mes (opcional)." },
+        savings_usd: { type: "number", description: "Ahorro vs mes anterior (opcional)." },
+        notes: { type: "string", description: "Notas (opcional)." },
+      },
+      required: ["period"],
     },
   },
 ];

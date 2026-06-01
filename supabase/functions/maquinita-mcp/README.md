@@ -40,19 +40,24 @@ No usa OAuth: el secret va en la URL, así que conecta como *no-auth connector*.
 
 | Tool | Qué hace |
 |------|----------|
-| `leer_cuentas` | Lista cuentas (id, nombre, tipo, moneda) → resolver nombre→id. |
+| `leer_cuentas` | Lista cuentas (id, nombre, tipo, moneda, **país, medio de pago**) → resolver nombre→id. |
 | `leer_categorias` | Lista categorías (id, nombre, color) → resolver nombre→id. |
-| `registrar_transaccion` | Inserta un consumo. Acepta `account_name`/`category_name` o sus ids. Calcula `amount_usd` si no se pasa. |
+| `registrar_transaccion` | Inserta un consumo. Acepta `account_name`/`category_name` o sus ids + dimensiones `country`/`payment_type`/`expense_type`. Calcula `amount_usd` si no se pasa. |
 | `registrar_transacciones_lote` | Inserta muchas de una (`{ items: [...] }`). |
 | `upsert_snapshot` | Crea/actualiza saldo de cuenta a una fecha (upsert por `account_id+snapshot_date`). |
 | `recategorizar` | Cambia la categoría de una transacción (o la limpia con `category_id: null`). |
 | `leer_resumen_gastos` | Total + desglose por categoría de un mes (`YYYY-MM`); excluye pagos. |
+| `leer_cierre` | Lee el cierre de un período (default mes actual) con su checklist. |
+| `crear_cierre` | Abre el cierre y siembra las 8 fuentes. Idempotente. |
+| `actualizar_item_cierre` | Marca una fuente `cargado`/`omitido`/`pendiente` (por `item_id` o `period`+`source`). |
+| `cerrar_mes` | Cierra el mes y congela el snapshot (`net_worth_usd`, `total_spend_usd`, `savings_usd`). |
 
 ### Reglas que aplica automáticamente
 
 - `amount_native > 0` = gasto, `< 0` = pago/devolución.
 - `amount_usd` / `balance_usd` = `*_native * fx_rate_to_usd` si no se pasan (FX default 1 para USD/USDT).
 - `native_currency` toma la de la cuenta si se omite.
+- `country` / `payment_type` se heredan de la cuenta si no se pasan; `expense_type` default `variable`.
 - Todo se escribe con el `user_id` del dueño (no hace falta pasarlo).
 
 ### Ejemplo (tools/call)

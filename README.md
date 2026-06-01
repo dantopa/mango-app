@@ -112,13 +112,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable-o-anon-key>
 Las migraciones viven en `supabase/migrations/` (idempotentes, en orden):
 
 1. `0001_initial_schema.sql` — extensiones, enums, tablas, índices.
-2. `0002_rls_and_seed.sql` — RLS por dueño + trigger que siembra las cuentas y
-   categorías por defecto cuando un usuario se registra.
+2. `0002_rls_and_seed.sql` — RLS por dueño + (histórico) trigger de seed en
+   signup. **El auto-seed fue removido en `0005`** (ver abajo).
 3. `0003_expense_dimensions.sql` — **aditiva**: agrega `country` / `payment_type`
    a `accounts`, y `country` / `payment_type` / `expense_type` a `transactions`,
    con backfill no destructivo de los datos existentes + índices de filtrado.
 4. `0004_monthly_close.sql` — **aditiva**: tablas `monthly_close` y
    `monthly_close_items` con RLS por dueño.
+5. `0005_remove_auto_seed.sql` — dropea el trigger de seed en signup (ya no se
+   crean cuentas/categorías por defecto; los datos se cargan vía MCP).
 
 Aplicalas con la **Supabase CLI**:
 
