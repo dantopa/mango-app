@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Public client env IS committed so Vercel git-integration builds work with zero
+# config. These NEXT_PUBLIC_ values ship in the browser bundle anyway (the
+# Supabase publishable key is public; RLS is the security boundary). The service
+# role key is NEVER committed.
+!.env.production
 
 # vercel
 .vercel
