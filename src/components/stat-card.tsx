@@ -1,5 +1,4 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 
 export function StatCard({
   label,
@@ -16,15 +15,17 @@ export function StatCard({
 }) {
   return (
     <Card className={className}>
-      <CardContent className="flex flex-col gap-1 p-5">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">{label}</span>
-          {icon && <span className="text-muted-foreground">{icon}</span>}
+      <CardContent className="flex flex-col gap-1 p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-xs text-muted-foreground sm:text-sm">{label}</span>
+          {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
         </div>
-        <span className={cn("text-2xl font-semibold tabular-nums tracking-tight")}>
+        <span className="text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">
           {value}
         </span>
-        {hint && <div className="text-sm text-muted-foreground">{hint}</div>}
+        {hint && (
+          <div className="truncate text-xs text-muted-foreground sm:text-sm">{hint}</div>
+        )}
       </CardContent>
     </Card>
   );

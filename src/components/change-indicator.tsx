@@ -8,11 +8,14 @@ export function ChangeIndicator({
   changeAbs,
   changePct,
   invert = false,
+  compact = false,
   className,
 }: {
   changeAbs: number | null;
   changePct: number | null;
   invert?: boolean;
+  /** Show only the % (no absolute amount). Useful in tight rows. */
+  compact?: boolean;
   className?: string;
 }) {
   if (changeAbs === null) {
@@ -31,11 +34,23 @@ export function ChangeIndicator({
       : "text-destructive";
 
   return (
-    <span className={cn("inline-flex items-center gap-1 text-sm font-medium", color, className)}>
-      <Icon className="size-4" />
-      {formatUsd(Math.abs(changeAbs), { compact: Math.abs(changeAbs) >= 10000 })}
-      {changePct !== null && (
-        <span className="opacity-80">({formatPercent(Math.abs(changePct))})</span>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-sm font-medium tabular-nums",
+        color,
+        className,
+      )}
+    >
+      <Icon className="size-4 shrink-0" />
+      {compact ? (
+        changePct !== null ? formatPercent(Math.abs(changePct)) : formatUsd(Math.abs(changeAbs), { compact: true })
+      ) : (
+        <>
+          {formatUsd(Math.abs(changeAbs), { compact: Math.abs(changeAbs) >= 10000 })}
+          {changePct !== null && (
+            <span className="opacity-80">({formatPercent(Math.abs(changePct))})</span>
+          )}
+        </>
       )}
     </span>
   );

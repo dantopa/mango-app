@@ -136,7 +136,7 @@ export default function GastosPage() {
       />
 
       {/* Pattern stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard
           label="Gasto del período"
           value={formatUsd(view.total)}
@@ -222,20 +222,21 @@ export default function GastosPage() {
                     key={c.name}
                     className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-secondary/40"
                   >
-                    <span className="flex items-center gap-2 text-sm">
+                    <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
                       <span
-                        className="size-2.5 rounded-full"
+                        className="size-2.5 shrink-0 rounded-full"
                         style={{ background: c.color }}
                       />
-                      {c.name}
+                      <span className="truncate">{c.name}</span>
                     </span>
-                    <div className="flex items-center gap-3">
+                    <div className="flex shrink-0 items-center gap-3">
                       <span className="text-sm tabular-nums">{formatUsd(c.current)}</span>
                       <ChangeIndicator
                         changeAbs={c.changeAbs}
                         changePct={c.changePct}
                         invert
-                        className="w-28 justify-end"
+                        compact
+                        className="w-14 justify-end"
                       />
                     </div>
                   </div>
