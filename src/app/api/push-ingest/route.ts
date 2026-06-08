@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { validateAuth } from "@/lib/push-ingest/auth";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
-import { supabaseAdmin } from "@/lib/push-ingest/supabase-admin";
+import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 import type { IngestMode } from "@/lib/push-ingest/types";
 
 const OWNER_USER_ID =
@@ -65,7 +65,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     // 7. INSERT into push_raw_log
     // Table not yet in generated Database types — cast to bypass strict table union until types are regenerated
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: insertError } = await (supabaseAdmin as any)
+    const supabase = getSupabaseAdmin() as any;
+    const { error: insertError } = await supabase
       .from("push_raw_log")
       .insert({
         user_id: OWNER_USER_ID,
