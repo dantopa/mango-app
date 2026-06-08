@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Nexo Token Pusher",
+  "version": "1.0.0",
+  "description": "Extrae cookies de sesión de Nexo y las envía al MCP server",
+  "permissions": ["cookies", "storage", "webRequest"],
+  "host_permissions": ["https://platform.nexo.com/*", "https://canalpersonas-ext.apps.bancolombia.com/*", "https://svpersonas.apps.bancolombia.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "icons": {
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

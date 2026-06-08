@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexo Token Extractor — Bookmarklet</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    .container { max-width: 720px; margin: 0 auto; }
+    h1 { color: #f8fafc; margin-bottom: 0.5rem; font-size: 1.75rem; }
+    h2 { color: #94a3b8; font-size: 1.1rem; margin-bottom: 1.5rem; font-weight: 400; }
+    h3 { color: #f8fafc; margin: 2rem 0 0.75rem; font-size: 1.2rem; }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    label { display: block; color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      color: #f8fafc;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    input:focus { outline: none; border-color: #6366f1; }
+
+    .btn {
+      display: inline-block;
+      padding: 0.6rem 1.2rem;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #4f46e5; }
+
+    .bookmarklet-link {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: #059669;
+      color: #fff;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: grab;
+      transition: background 0.2s;
+    }
+    .bookmarklet-link:hover { background: #047857; }
+    .bookmarklet-link:active { cursor: grabbing; }
+
+    .steps { counter-reset: step; padding-left: 0; list-style: none; }
+    .steps li {
+      counter-increment: step;
+      margin-bottom: 1rem;
+      padding-left: 2.5rem;
+      position: relative;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1.75rem;
+      height: 1.75rem;
+      background: #6366f1;
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    code {
+      background: #0f172a;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: #a5b4fc;
+    }
+
+    .warning {
+      background: #451a03;
+      border: 1px solid #92400e;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      color: #fbbf24;
+    }
+
+    .generated-section {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      text-align: center;
+    }
+
+    .status { margin-top: 0.5rem; font-size: 0.8rem; color: #64748b; }
+    .status.ready { color: #34d399; }
+    .status.error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔑 Nexo Token Extractor</h1>
+    <h2>Bookmarklet para enviar tokens de sesión al MCP server</h2>
+
+    <!-- Configuration -->
+    <div class="card">
+      <h3 style="margin-top:0">⚙️ Configuración</h3>
+      <p style="margin-bottom:1rem; font-size:0.9rem; color:#94a3b8;">
+        Completá estos campos para generar el bookmarklet personalizado.
+      </p>
+
+      <label for="endpoint-url">URL del endpoint de refresh</label>
+      <input
+        type="text"
+        id="endpoint-url"
+        placeholder="https://xyz.supabase.co/functions/v1/browser-token-mcp/refresh"
+        value=""
+      >
+
+      <label for="refresh-secret">Refresh Secret (BROWSER_MCP_REFRESH_SECRET)</label>
+      <input
+        type="password"
+        id="refresh-secret"
+        placeholder="tu-refresh-secret-aquí"
+        value=""
+      >
+
+      <button class="btn" onclick="generateBookmarklet()">Generar Bookmarklet</button>
+
+      <div id="bookmarklet-output" class="generated-section" style="display:none;">
+        <p style="margin-bottom:0.75rem; color:#94a3b8; font-size:0.85rem;">
+          Arrastrá este enlace a tu barra de favoritos:
+        </p>
+        <a id="bookmarklet-anchor" class="bookmarklet-link" href="#">
+          📤 Enviar Token Nexo
+        </a>
+        <div id="gen-status" class="status ready">✓ Bookmarklet generado correctamente</div>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="card">
+      <h3 style="margin-top:0">📋 Instrucciones de uso</h3>
+
+      <ol class="steps">
+        <li>
+          <strong>Configurá los campos de arriba</strong> con la URL de tu Edge Function
+          y el refresh secret que configuraste en las variables de entorno de Supabase.
+        </li>
+        <li>
+          <strong>Hacé clic en "Generar Bookmarklet"</strong> para crear el enlace personalizado.
+        </li>
+        <li>
+          <strong>Arrastrá el botón verde</strong> (<em>"📤 Enviar Token Nexo"</em>) a tu barra de favoritos/marcadores.
+        </li>
+        <li>
+          <strong>Logueate en <a href="https://platform.nexo.com" style="color:#a5b4fc">platform.nexo.com</a></strong>
+          normalmente con tu usuario y contraseña.
+        </li>
+        <li>
+          <strong>Hacé clic en el bookmarklet</strong> desde la barra de favoritos mientras
+          estás en platform.nexo.com. El script va a extraer las cookies de sesión y enviarlas
+          al MCP server automáticamente.
+        </li>
+        <li>
+          <strong>Confirmá el resultado:</strong> vas a ver una alerta indicando si el token
+          se envió correctamente o si hubo un error.
+        </li>
+      </ol>
+
+      <div class="warning">
+        ⚠️ <strong>Importante:</strong> El bookmarklet solo funciona cuando estás logueado
+        en <code>platform.nexo.com</code>. Si las cookies expiraron, volvé a loguearte
+        antes de ejecutarlo. El token se envía cifrado y se almacena en Supabase Vault.
+      </div>
+    </div>
+
+    <!-- How it works -->
+    <div class="card">
+      <h3 style="margin-top:0">🔍 ¿Qué hace el bookmarklet?</h3>
+      <ol class="steps">
+        <li>Lee las cookies <code>JSESSIONID</code>, <code>nsi</code>, <code>esi</code> y <code>nexo_installation_id</code> desde <code>document.cookie</code>.</li>
+        <li>Construye un objeto JSON con esos valores: <code>{jsessionid, nsi, esi, installation_id}</code>.</li>
+        <li>Envía un POST al endpoint de refresh con el header <code>Authorization: Bearer TU_SECRET</code>.</li>
+        <li>Muestra una alerta con el resultado (éxito o error).</li>
+      </ol>
+    </div>
+
+    <!-- Troubleshooting -->
+    <div class="card">
+      <h3 style="margin-top:0">🛠️ Solución de problemas</h3>
+      <ul style="padding-left:1.2rem; font-size:0.9rem;">
+        <li style="margin-bottom:0.5rem;"><strong>"No se encontró JSESSIONID"</strong> → No estás logueado en Nexo o la sesión expiró. Volvé a loguearte.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"Error 401"</strong> → El refresh secret es incorrecto. Revisá la configuración.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"Error de red"</strong> → Verificá la URL del endpoint y que la Edge Function esté deployeada.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"No se encontró nexo_installation_id"</strong> → Navegá a alguna página dentro de Nexo para que se genere la cookie.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    function generateBookmarklet() {
+      const url = document.getElementById('endpoint-url').value.trim();
+      const secret = document.getElementById('refresh-secret').value.trim();
+
+      if (!url) {
+        alert('⚠️ Ingresá la URL del endpoint de refresh');
+        return;
+      }
+      if (!secret) {
+        alert('⚠️ Ingresá el refresh secret');
+        return;
+      }
+
+      // Build the bookmarklet JavaScript code
+      const bookmarkletCode = buildBookmarkletCode(url, secret);
+
+      // Set the href on the anchor
+      const anchor = document.getElementById('bookmarklet-anchor');
+      anchor.href = bookmarkletCode;
+
+      // Show the output section
+      document.getElementById('bookmarklet-output').style.display = 'block';
+    }
+
+    function buildBookmarkletCode(refreshUrl, refreshSecret) {
+      // The bookmarklet code as a self-executing function
+      // We use encodeURIComponent-safe string building
+      const code = `
+(function() {
+  try {
+    var cookies = document.cookie;
+    function getCookie(name) {
+      var match = cookies.match(new RegExp('(?:^|;\\\\s*)' + name + '=([^;]*)'));
+      return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    var jsessionid = getCookie('JSESSIONID');
+    var nsi = getCookie('nsi');
+    var esi = getCookie('esi');
+    var installation_id = getCookie('nexo_installation_id');
+
+    if (!jsessionid) { alert('❌ Error: No se encontró la cookie JSESSIONID. ¿Estás logueado en platform.nexo.com?'); return; }
+    if (!nsi) { alert('❌ Error: No se encontró la cookie nsi.'); return; }
+    if (!esi) { alert('❌ Error: No se encontró la cookie esi.'); return; }
+    if (!installation_id) { alert('⚠️ Advertencia: No se encontró nexo_installation_id. Navegá dentro de Nexo e intentá de nuevo.'); return; }
+
+    var token = JSON.stringify({
+      jsessionid: jsessionid,
+      nsi: nsi,
+      esi: esi,
+      installation_id: installation_id
+    });
+
+    var body = JSON.stringify({
+      provider: 'nexo',
+      token: token
+    });
+
+    fetch('${refreshUrl}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${refreshSecret}'
+      },
+      body: body
+    })
+    .then(function(res) {
+      if (res.ok) {
+        return res.json().then(function(data) {
+          alert('✅ Token enviado correctamente!\\n\\nProvider: ' + data.provider + '\\nActualizado: ' + data.updated_at);
+        });
+      } else {
+        return res.text().then(function(text) {
+          alert('❌ Error del servidor (' + res.status + '):\\n' + text);
+        });
+      }
+    })
+    .catch(function(err) {
+      alert('❌ Error de red:\\n' + err.message);
+    });
+  } catch(e) {
+    alert('❌ Error inesperado:\\n' + e.message);
+  }
+})();
+      `.trim();
+
+      // Minify by removing newlines and extra spaces, then wrap in javascript: URI
+      const minified = code
+        .replace(/\n\s*/g, ' ')
+        .replace(/\s{2,}/g, ' ');
+
+      return 'javascript:' + encodeURIComponent(minified);
+    }
+  </script>
+</body>
+</html>

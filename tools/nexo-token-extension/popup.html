@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 340px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #1e293b;
+      color: #e2e8f0;
+      margin: 0;
+    }
+    h2 { font-size: 14px; margin: 0 0 12px; color: #f8fafc; }
+    .status {
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .status.idle { background: #334155; color: #94a3b8; }
+    .status.loading { background: #1e3a5f; color: #60a5fa; }
+    .status.success { background: #064e3b; color: #34d399; }
+    .status.error { background: #451a03; color: #fbbf24; }
+    .btn-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    button {
+      flex: 1;
+      padding: 10px;
+      background: #6366f1;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #4f46e5; }
+    button:disabled { background: #475569; cursor: not-allowed; }
+    .btn-green { background: #059669; }
+    .btn-green:hover { background: #047857; }
+    .config {
+      margin-top: 12px;
+      border-top: 1px solid #334155;
+      padding-top: 12px;
+    }
+    .config summary { font-size: 11px; color: #64748b; cursor: pointer; }
+    .config input {
+      width: 100%;
+      margin-top: 6px;
+      padding: 6px 8px;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      color: #f8fafc;
+      font-size: 11px;
+      font-family: monospace;
+      box-sizing: border-box;
+    }
+    .config label { display: block; font-size: 11px; color: #94a3b8; margin-top: 8px; }
+    .save-btn { margin-top: 8px; padding: 6px; font-size: 11px; background: #059669; }
+    .save-btn:hover { background: #047857; }
+  </style>
+</head>
+<body>
+  <h2>🔑 Token Pusher (Multi-Provider)</h2>
+  <div id="status" class="status idle">Cargando...</div>
+
+  <div class="btn-row">
+    <button id="push-nexo">📤 Nexo</button>
+    <button id="push-bancolombia" class="btn-green">📤 Bancolombia</button>
+  </div>
+
+  <details class="config">
+    <summary>⚙️ Configuración</summary>
+    <label>URL del refresh endpoint:</label>
+    <input type="text" id="url" placeholder="https://xyz.supabase.co/functions/v1/browser-token-mcp/refresh">
+    <label>Refresh Secret:</label>
+    <input type="password" id="secret" placeholder="tu-refresh-secret">
+    <button id="save-btn" class="save-btn">Guardar</button>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>
