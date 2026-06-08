@@ -38,6 +38,9 @@ yarn-error.log*
 # role key is NEVER committed.
 !.env.production
 
+# kiro
+.kiro/
+
 # vercel
 .vercel
 
