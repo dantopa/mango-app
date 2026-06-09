@@ -1,9 +1,11 @@
 import type { PushPayload, PipelineResult, IngestMode } from "./types";
-import { computeDedupKey, isDuplicate } from "./dedup";
+import { computeDedupKey, isDuplicate, findCrossSourceDuplicate } from "./dedup";
 import { getParser } from "./parser-registry";
 import { resolveRate, calculateUsd } from "./fx";
 import { categorize } from "./categorizer";
 import { classifyTransaction } from "./classifier";
+import { computeSemaphore } from "./semaphore";
+import { checkAndAlert } from "./alert";
 import { getSupabaseAdmin } from "./supabase-admin";
 import "./parsers"; // side-effect: registers all parsers
 
@@ -42,7 +44,25 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   const classification = await classifyTransaction(parsed, OWNER_USER_ID);
   if (classification.type === "transfer") {
     await supabase.from("push_ingest_log").update({ status: "transfer" }).eq("dedup_key", dedupKey);
-    return { status: "registered", transaction_id: "transfer-skipped" }; // TODO: improve
+    return { status: "registered", transaction_id: "transfer-skipped" };
+  }
+
+  // 5.5. Cross-source dedup — check if same amount from different package within 2 min
+  const postedAt = typeof payload.timestamp === "number"
+    ? new Date(payload.timestamp)
+    : new Date();
+  const crossDup = await findCrossSourceDuplicate(parsed.amount_native, payload.packageName, postedAt);
+  if (crossDup) {
+    // Same purchase already registered from another source — keep the one with merchant
+    const keepExisting = crossDup.merchant !== null;
+    if (keepExisting) {
+      await supabase.from("push_ingest_log").update({
+        status: "deduped_cross_source",
+        related_dedup_key: crossDup.dedup_key,
+      }).eq("dedup_key", dedupKey);
+      return { status: "deduped_cross_source", kept_key: crossDup.dedup_key };
+    }
+    // This one has better info — mark the other as deduped (but don't delete its transaction)
   }
 
   // 6. FX conversion
@@ -115,5 +135,54 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     })
     .eq("dedup_key", dedupKey);
 
-  return { status: "registered", transaction_id: txData.id };
+  // 11. Evaluate semaphore and alert if state changed
+  let semaphoreResult = undefined;
+  try {
+    const now = new Date();
+    const currentDay = now.getDate();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+
+    // Sum variable expenses this month (exclude payments, fixed, needs_review)
+    const { data: monthTxns } = await supabase
+      .from("transactions")
+      .select("amount_usd")
+      .eq("user_id", OWNER_USER_ID)
+      .eq("is_payment", false)
+      .eq("expense_type", "variable")
+      .eq("needs_review", false)
+      .gte("tx_date", monthStart)
+      .lte("tx_date", monthEnd);
+
+    const accumulatedSpend = (monthTxns ?? []).reduce(
+      (sum: number, tx: { amount_usd: number }) => sum + (tx.amount_usd > 0 ? tx.amount_usd : 0),
+      0,
+    );
+
+    const ceiling = parseFloat(process.env.BUDGET_CEILING_USD ?? "0");
+    if (ceiling > 0) {
+      semaphoreResult = computeSemaphore({
+        accumulated_spend: accumulatedSpend,
+        ceiling,
+        current_day: currentDay,
+        days_in_month: daysInMonth,
+      });
+
+      // Alert on state transition
+      checkAndAlert(null, semaphoreResult.state); // TODO: track previous state
+
+      console.log("[push-ingest][semaphore]", JSON.stringify({
+        state: semaphoreResult.state,
+        spent: accumulatedSpend,
+        ceiling,
+        pct: semaphoreResult.pct,
+        daily_budget: Math.round(Math.max(0, (ceiling - accumulatedSpend) / (daysInMonth - currentDay + 1)) * 100) / 100,
+      }));
+    }
+  } catch (e) {
+    console.error("[push-ingest][semaphore] error:", e);
+  }
+
+  return { status: "registered", transaction_id: txData.id, semaphore: semaphoreResult };
 }
