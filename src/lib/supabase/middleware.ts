@@ -3,7 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 
 import type { Database } from "./database.types";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+const PUBLIC_PATHS = ["/login", "/auth", "/api"];
 
 /**
  * Refreshes the Supabase session on every request and gates the app:
