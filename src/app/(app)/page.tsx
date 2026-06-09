@@ -25,6 +25,7 @@ import {
 import { formatMonth, formatUsd } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
+import { SemaphoreGauge } from "@/components/semaphore-gauge";
 import { ChangeIndicator } from "@/components/change-indicator";
 import { GoalTracker } from "@/components/goal-tracker";
 import { LoadingState, ErrorState, EmptyState } from "@/components/states";
@@ -136,7 +137,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick stats */}
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <SemaphoreGauge />
         <StatCard
           label={`Gasto ${currentMonth ? formatMonth(currentMonth + "-01") : "del mes"}`}
           value={formatUsd(monthSpend)}
