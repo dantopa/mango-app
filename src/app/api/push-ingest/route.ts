@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { validateAuth } from "@/lib/push-ingest/auth";
+import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
@@ -84,8 +85,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ status: "logged" });
     }
 
-    // 9. full_pipeline mode — for now, also respond "logged" (wired in task 8.1)
-    return NextResponse.json({ status: "logged" });
+    // 9. full_pipeline mode — execute the full pipeline
+    const result = await executePipeline(payload, mode);
+    return NextResponse.json(result);
   } catch {
     return NextResponse.json(
       { error: "internal_server_error" },
