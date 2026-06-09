@@ -160,7 +160,15 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
       0,
     );
 
-    const ceiling = parseFloat(process.env.BUDGET_CEILING_USD ?? "0");
+    // Read ceiling from user settings (DB), fallback to env var, then 0 (disabled)
+    const { data: userSettings } = await supabase
+      .from("user_settings")
+      .select("budget_ceiling_usd")
+      .eq("user_id", OWNER_USER_ID)
+      .maybeSingle();
+    const ceiling = userSettings?.budget_ceiling_usd
+      ? parseFloat(String(userSettings.budget_ceiling_usd))
+      : parseFloat(process.env.BUDGET_CEILING_USD ?? "0");
     if (ceiling > 0) {
       semaphoreResult = computeSemaphore({
         accumulated_spend: accumulatedSpend,

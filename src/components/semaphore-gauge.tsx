@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { useSemaphore } from "@/hooks/use-semaphore";
+import { BudgetSettings } from "@/components/budget-settings";
 
 const STATE_CONFIG = {
   verde: {
@@ -43,13 +44,30 @@ export function SemaphoreGauge() {
     );
   }
 
-  if (error || !data) {
+  if (error) {
     return (
       <Card>
         <CardContent className="p-4 sm:p-5">
           <span className="text-sm text-muted-foreground">
             No se pudo cargar el semáforo
           </span>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // No ceiling configured — show CTA to set it up
+  if (!data) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:p-5">
+          <span className="text-xs text-muted-foreground sm:text-sm">
+            Presupuesto mensual
+          </span>
+          <p className="text-sm font-medium">
+            Configurá tu techo mensual para activar el semáforo
+          </p>
+          <BudgetSettings />
         </CardContent>
       </Card>
     );

@@ -5,11 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { computeSemaphore } from "@/lib/push-ingest/semaphore";
 import type { SemaphoreResult } from "@/lib/push-ingest/types";
+import { useSettings } from "./use-settings";
 
 const supabase = createClient();
-
-/** Monthly budget ceiling in USD. Configurable — hardcoded placeholder for now. */
-const BUDGET_CEILING_USD = 2000;
 
 export type SemaphoreData = SemaphoreResult & {
   /** Rolling daily budget: (ceiling - spent) / remaining days */
@@ -45,19 +43,27 @@ function getMonthInfo(): { currentDay: number; daysInMonth: number } {
 /**
  * TanStack Query hook for the budget semaphore.
  *
+ * - Reads ceiling from user_settings (DB), fallback to env var, then 0 (disabled)
  * - Queries current month's variable expenses (is_payment=false, expense_type='variable')
  * - Computes semaphore state
- * - Returns semaphore result + rolling daily budget
+ * - Returns semaphore result + rolling daily budget, or null if no ceiling configured
  */
 export function useSemaphore() {
-  return useQuery<SemaphoreData>({
-    queryKey: ["semaphore", "current-month"],
-    queryFn: async (): Promise<SemaphoreData> => {
+  const { data: settings, isLoading: settingsLoading } = useSettings();
+
+  // Read ceiling from user settings (DB), fallback to env var, then 0 (disabled)
+  const ceiling = settings?.budget_ceiling_usd ?? null;
+
+  return useQuery<SemaphoreData | null>({
+    queryKey: ["semaphore", "current-month", ceiling],
+    queryFn: async (): Promise<SemaphoreData | null> => {
+      // No ceiling configured → return null to signal "not configured"
+      if (ceiling === null || ceiling <= 0) return null;
+
       const { start, end } = getCurrentMonthRange();
       const { currentDay, daysInMonth } = getMonthInfo();
 
       // Query accumulated variable expenses for current month
-      // is_payment=false excludes transfers, expense_type='variable' for regular expenses
       const { data, error } = await supabase
         .from("transactions")
         .select("amount_usd")
@@ -76,7 +82,7 @@ export function useSemaphore() {
 
       const semaphore = computeSemaphore({
         accumulated_spend: accumulatedSpend,
-        ceiling: BUDGET_CEILING_USD,
+        ceiling,
         current_day: currentDay,
         days_in_month: daysInMonth,
       });
@@ -85,7 +91,7 @@ export function useSemaphore() {
       const remainingDays = daysInMonth - currentDay + 1; // include today
       const dailyBudget =
         remainingDays > 0
-          ? Math.max(0, (BUDGET_CEILING_USD - accumulatedSpend) / remainingDays)
+          ? Math.max(0, (ceiling - accumulatedSpend) / remainingDays)
           : 0;
 
       return {
@@ -93,5 +99,6 @@ export function useSemaphore() {
         daily_budget: Math.round(dailyBudget * 100) / 100,
       };
     },
+    enabled: !settingsLoading,
   });
 }
