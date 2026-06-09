@@ -3,18 +3,22 @@ export type FxResult =
   | { ok: false; reason: "timeout" | "error" };
 
 /**
- * Get exchange rate from configurable FX service.
- * Reads FX_SERVICE_URL from env. Uses AbortController for timeout (default 2000ms).
+ * Default FX API: frankfurter.app (free, no API key needed)
+ * Format: https://api.frankfurter.app/latest?from=COP&to=USD
+ * Response: { "rates": { "USD": 0.000234 } }
+ */
+const DEFAULT_FX_URL = "https://api.frankfurter.app/latest";
+
+/**
+ * Get exchange rate from FX service.
+ * Uses FX_SERVICE_URL env var if set, otherwise falls back to frankfurter.app.
  */
 export async function getExchangeRate(
   from: string,
   to: string,
-  timeoutMs: number = 2000,
+  timeoutMs: number = 3000,
 ): Promise<FxResult> {
-  const baseUrl = process.env.FX_SERVICE_URL;
-  if (!baseUrl) {
-    return { ok: false, reason: "error" };
-  }
+  const baseUrl = process.env.FX_SERVICE_URL || DEFAULT_FX_URL;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -27,12 +31,19 @@ export async function getExchangeRate(
       return { ok: false, reason: "error" };
     }
 
-    const data = (await response.json()) as { rate?: number };
-    if (typeof data.rate !== "number" || !isFinite(data.rate)) {
-      return { ok: false, reason: "error" };
+    const data = await response.json();
+
+    // Support frankfurter.app format: { "rates": { "USD": 0.000234 } }
+    if (data.rates && typeof data.rates[to] === "number") {
+      return { ok: true, rate: data.rates[to] };
     }
 
-    return { ok: true, rate: data.rate };
+    // Support generic format: { "rate": 0.000234 }
+    if (typeof data.rate === "number" && isFinite(data.rate)) {
+      return { ok: true, rate: data.rate };
+    }
+
+    return { ok: false, reason: "error" };
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") {
       return { ok: false, reason: "timeout" };
