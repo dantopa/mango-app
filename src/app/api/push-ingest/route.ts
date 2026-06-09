@@ -77,7 +77,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       });
 
     if (insertError) {
-      return NextResponse.json({ error: "log_failed" }, { status: 500 });
+      console.error("[push-ingest] raw log insert failed:", JSON.stringify(insertError));
+      return NextResponse.json({ error: "log_failed", detail: insertError.message }, { status: 500 });
     }
 
     // 8. In log_only mode (or Phase 0), respond immediately
