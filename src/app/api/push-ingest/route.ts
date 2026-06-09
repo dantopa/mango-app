@@ -49,7 +49,34 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "invalid_json" }, { status: 400 });
     }
 
-    // 5. Zod validation
+    // 5. Zod validation — in log_only mode, accept any JSON object
+    const mode = resolveMode();
+    
+    if (mode === "log_only") {
+      // Phase 0: accept any JSON, don't validate schema — we need to SEE what the forwarder sends
+      const payload = body as Record<string, unknown>;
+      const packageName = String(payload.packageName ?? payload.appName ?? payload.package ?? "unknown");
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const supabase = getSupabaseAdmin() as any;
+      const { error: insertError } = await supabase
+        .from("push_raw_log")
+        .insert({
+          user_id: OWNER_USER_ID,
+          package_name: packageName,
+          payload: payload,
+          received_at: new Date().toISOString(),
+        });
+
+      if (insertError) {
+        console.error("[push-ingest] raw log insert failed:", JSON.stringify(insertError));
+        return NextResponse.json({ error: "log_failed", detail: insertError.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ status: "logged" });
+    }
+
+    // full_pipeline mode — strict validation
     const parseResult = pushPayloadSchema.safeParse(body);
     if (!parseResult.success) {
       return NextResponse.json(
@@ -59,32 +86,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const payload = parseResult.data;
-
-    // 6. Determine mode
-    const mode = resolveMode();
-
-    // 7. INSERT into push_raw_log
-    // Table not yet in generated Database types — cast to bypass strict table union until types are regenerated
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase = getSupabaseAdmin() as any;
-    const { error: insertError } = await supabase
-      .from("push_raw_log")
-      .insert({
-        user_id: OWNER_USER_ID,
-        package_name: payload.packageName,
-        payload: payload,
-        received_at: new Date().toISOString(),
-      });
-
-    if (insertError) {
-      console.error("[push-ingest] raw log insert failed:", JSON.stringify(insertError));
-      return NextResponse.json({ error: "log_failed", detail: insertError.message }, { status: 500 });
-    }
-
-    // 8. In log_only mode (or Phase 0), respond immediately
-    if (mode === "log_only") {
-      return NextResponse.json({ status: "logged" });
-    }
 
     // 9. full_pipeline mode — execute the full pipeline
     const result = await executePipeline(payload, mode);
