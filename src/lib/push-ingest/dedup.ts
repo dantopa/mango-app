@@ -48,3 +48,41 @@ export async function isDuplicate(dedupKey: string): Promise<boolean> {
 
   return data !== null;
 }
+
+/**
+ * Cross-source dedup: find a transaction from a DIFFERENT package
+ * with the same amount within a 2-minute window.
+ * Returns the existing dedup_key and merchant if found, null otherwise.
+ */
+export async function findCrossSourceDuplicate(
+  amountNative: number,
+  excludePackage: string,
+  timestamp: Date,
+): Promise<{ dedup_key: string; merchant: string | null } | null> {
+  const supabase = getSupabaseAdmin();
+
+  const windowMs = 2 * 60 * 1000; // 2 minutes
+  const start = new Date(timestamp.getTime() - windowMs).toISOString();
+  const end = new Date(timestamp.getTime() + windowMs).toISOString();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
+    .from("push_ingest_log")
+    .select("dedup_key, merchant")
+    .eq("amount_native", amountNative)
+    .neq("package_name", excludePackage)
+    .eq("status", "registered")
+    .gte("created_at", start)
+    .lte("created_at", end)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[dedup] findCrossSourceDuplicate query error:", error.message);
+    return null;
+  }
+
+  if (!data) return null;
+
+  return { dedup_key: data.dedup_key, merchant: data.merchant };
+}
