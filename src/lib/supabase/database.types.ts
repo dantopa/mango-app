@@ -124,6 +124,44 @@ export type Database = {
         }
         Relationships: []
       }
+      merchant_category_rules: {
+        Row: {
+          category_id: string
+          created_at: string
+          id: string
+          match_type: string
+          pattern: string
+          priority: number
+          user_id: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          id?: string
+          match_type?: string
+          pattern: string
+          priority?: number
+          user_id: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          id?: string
+          match_type?: string
+          pattern?: string
+          priority?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "merchant_category_rules_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       monthly_close: {
         Row: {
           closed_at: string | null
@@ -254,27 +292,123 @@ export type Database = {
           },
         ]
       }
-      user_settings: {
+      push_ingest_log: {
         Row: {
-          id: string
-          user_id: string
-          budget_ceiling_usd: number | null
+          amount_native: number | null
+          amount_usd: number | null
           created_at: string
+          dedup_key: string
+          error_message: string | null
+          merchant: string | null
+          native_currency: string | null
+          package_name: string
+          raw_log_id: string | null
+          related_dedup_key: string | null
+          status: string
+          transaction_id: string | null
           updated_at: string
+          user_id: string
         }
         Insert: {
-          id?: string
-          user_id: string
-          budget_ceiling_usd?: number | null
+          amount_native?: number | null
+          amount_usd?: number | null
           created_at?: string
+          dedup_key: string
+          error_message?: string | null
+          merchant?: string | null
+          native_currency?: string | null
+          package_name: string
+          raw_log_id?: string | null
+          related_dedup_key?: string | null
+          status?: string
+          transaction_id?: string | null
           updated_at?: string
+          user_id: string
         }
         Update: {
-          id?: string
-          user_id?: string
-          budget_ceiling_usd?: number | null
+          amount_native?: number | null
+          amount_usd?: number | null
           created_at?: string
+          dedup_key?: string
+          error_message?: string | null
+          merchant?: string | null
+          native_currency?: string | null
+          package_name?: string
+          raw_log_id?: string | null
+          related_dedup_key?: string | null
+          status?: string
+          transaction_id?: string | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_ingest_log_raw_log_id_fkey"
+            columns: ["raw_log_id"]
+            isOneToOne: false
+            referencedRelation: "push_raw_log"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_ingest_log_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      push_raw_log: {
+        Row: {
+          created_at: string
+          id: string
+          package_name: string
+          payload: Json
+          received_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          package_name: string
+          payload: Json
+          received_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          package_name?: string
+          payload?: Json
+          received_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      push_subscriptions: {
+        Row: {
+          created_at: string
+          endpoint: string
+          id: string
+          keys_auth: string
+          keys_p256dh: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          endpoint: string
+          id?: string
+          keys_auth: string
+          keys_p256dh: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          endpoint?: string
+          id?: string
+          keys_auth?: string
+          keys_p256dh?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -295,7 +429,9 @@ export type Database = {
           is_payment: boolean
           merchant: string | null
           native_currency: string
+          needs_review: boolean
           payment_type: string | null
+          source: string
           statement_period: string | null
           tx_date: string
           user_id: string
@@ -316,7 +452,9 @@ export type Database = {
           is_payment?: boolean
           merchant?: string | null
           native_currency: string
+          needs_review?: boolean
           payment_type?: string | null
+          source?: string
           statement_period?: string | null
           tx_date: string
           user_id?: string
@@ -337,7 +475,9 @@ export type Database = {
           is_payment?: boolean
           merchant?: string | null
           native_currency?: string
+          needs_review?: boolean
           payment_type?: string | null
+          source?: string
           statement_period?: string | null
           tx_date?: string
           user_id?: string
@@ -359,13 +499,73 @@ export type Database = {
           },
         ]
       }
+      transfer_classification_rules: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          list_type: string
+          match_type: string
+          pattern: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          list_type?: string
+          match_type?: string
+          pattern: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          list_type?: string
+          match_type?: string
+          pattern?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          budget_ceiling_usd: number | null
+          created_at: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          budget_ceiling_usd?: number | null
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          budget_ceiling_usd?: number | null
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      seed_defaults_for_user: {
-        Args: { p_user_id: string }
+      vault_get_secret: { Args: { p_name: string }; Returns: string }
+      vault_read_secret: { Args: { secret_name: string }; Returns: string }
+      vault_upsert_secret: {
+        Args: { p_name: string; p_secret: string }
+        Returns: undefined
+      }
+      vault_write_secret: {
+        Args: { secret_name: string; secret_value: string }
         Returns: undefined
       }
     }
