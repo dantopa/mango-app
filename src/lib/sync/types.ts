@@ -9,9 +9,15 @@ export interface CandidateTransaction {
   description_raw: string;
   account_name: string; // "Bancolombia" | "Nexo Card"
   source: SyncSource;
+  expense_type?: "fixed" | "variable"; // defaults to "variable" if not set
 }
 
-export type SyncSource = "sync_bancolombia" | "sync_nexo";
+export type SyncSource =
+  | "sync_bancolombia"
+  | "sync_nexo"
+  | "sync_gmail_bancolombia"
+  | "sync_gmail_rappicard"
+  | "sync_gmail_arriendo";
 
 /** Resultado de dedup para una candidata individual */
 export type DedupDecision =
@@ -45,7 +51,9 @@ export type SyncErrorCode =
   | "MCP_ERROR"
   | "FX_ERROR"
   | "DB_ERROR"
-  | "TIMEOUT";
+  | "TIMEOUT"
+  | "GMAIL_AUTH_REQUIRED"
+  | "GMAIL_API_ERROR";
 
 /** Error response */
 export interface SyncErrorResponse {
@@ -53,17 +61,20 @@ export interface SyncErrorResponse {
   code: SyncErrorCode;
 }
 
+/** Fuentes visibles desde el cliente (incluye "sync_gmail" como grupo) */
+export type ClientSyncSource = SyncSource | "sync_gmail";
+
 /** Parámetros del sync desde el cliente */
 export interface SyncParams {
   month: string;
-  sources: SyncSource[];
+  sources: ClientSyncSource[];
 }
 
 /** Estado de progreso en el cliente */
 export interface SyncProgress {
-  current_source: SyncSource | null;
+  current_source: ClientSyncSource | null;
   completed: SyncSourceResult[];
-  errors: Array<{ source: SyncSource; error: string }>;
+  errors: Array<{ source: ClientSyncSource; error: string }>;
   status: "idle" | "running" | "done";
 }
 
@@ -77,4 +88,8 @@ export const ERROR_MESSAGES: Record<SyncErrorCode, string> = {
   FX_ERROR:
     "No se pudo obtener la tasa de cambio. Algunas transacciones no se procesaron.",
   DB_ERROR: "Error al guardar las transacciones. Intentá de nuevo.",
+  GMAIL_AUTH_REQUIRED:
+    "Gmail no está conectado. Conectá tu cuenta para sincronizar.",
+  GMAIL_API_ERROR:
+    "Error al consultar Gmail. Intentá de nuevo en unos minutos.",
 };

@@ -1,21 +1,27 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type {
-  SyncParams,
+  ClientSyncSource,
   SyncProgress,
   SyncSource,
   SyncSourceResult,
   SyncErrorResponse,
 } from "@/lib/sync/types";
+import type { GmailSyncCursor, GmailSyncResponse } from "@/lib/sync/gmail/types";
 import { queryKeys } from "@/hooks/use-finance";
 
 const SOURCE_ENDPOINTS: Record<SyncSource, string> = {
   sync_bancolombia: "/api/sync/bancolombia",
   sync_nexo: "/api/sync/nexo",
+  sync_gmail_bancolombia: "/api/sync/gmail",
+  sync_gmail_rappicard: "/api/sync/gmail",
+  sync_gmail_arriendo: "/api/sync/gmail",
 };
+
+const GMAIL_ENDPOINT = "/api/sync/gmail";
 
 /**
  * Hook que orquesta la ejecución secuencial del sync.
@@ -23,7 +29,8 @@ const SOURCE_ENDPOINTS: Record<SyncSource, string> = {
  *
  * Internamente:
  * - Itera sources en orden
- * - Hace POST a /api/sync/{source}
+ * - Para fuentes legacy: hace un solo POST a /api/sync/{source}
+ * - Para "sync_gmail": POST en loop con cursor hasta next === null
  * - Acumula resultados en progress
  * - Invalida query de transactions al terminar
  */
@@ -37,7 +44,7 @@ export function useSync() {
   });
 
   const startSync = useCallback(
-    async (params: SyncParams) => {
+    async (params: { month: string; sources: ClientSyncSource[] }) => {
       setProgress({
         current_source: null,
         completed: [],
@@ -46,43 +53,17 @@ export function useSync() {
       });
 
       const completed: SyncSourceResult[] = [];
-      const errors: Array<{ source: SyncSource; error: string }> = [];
+      const errors: Array<{ source: ClientSyncSource; error: string }> = [];
 
       for (const source of params.sources) {
         setProgress((prev) => ({ ...prev, current_source: source }));
 
-        try {
-          const response = await fetch(SOURCE_ENDPOINTS[source], {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ month: params.month }),
-          });
-
-          if (!response.ok) {
-            const errBody: SyncErrorResponse = await response.json().catch(
-              () => ({ error: `HTTP ${response.status}`, code: "MCP_ERROR" as const })
-            );
-            errors.push({ source, error: errBody.error });
-            setProgress((prev) => ({
-              ...prev,
-              errors: [...prev.errors, { source, error: errBody.error }],
-            }));
-            continue;
-          }
-
-          const data: { result: SyncSourceResult } = await response.json();
-          completed.push(data.result);
-          setProgress((prev) => ({
-            ...prev,
-            completed: [...prev.completed, data.result],
-          }));
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Error de red";
-          errors.push({ source, error: msg });
-          setProgress((prev) => ({
-            ...prev,
-            errors: [...prev.errors, { source, error: msg }],
-          }));
+        if (source === "sync_gmail") {
+          // Gmail: cursor-based loop
+          await syncGmail(params.month, completed, errors, setProgress);
+        } else {
+          // Legacy sources: single POST
+          await syncLegacySource(source, params.month, completed, errors, setProgress);
         }
       }
 
@@ -111,4 +92,119 @@ export function useSync() {
   }, []);
 
   return { startSync, progress, reset };
+}
+
+/** Sync a single legacy source with one POST request */
+async function syncLegacySource(
+  source: SyncSource,
+  month: string,
+  completed: SyncSourceResult[],
+  errors: Array<{ source: ClientSyncSource; error: string }>,
+  setProgress: React.Dispatch<React.SetStateAction<SyncProgress>>
+) {
+  try {
+    const response = await fetch(SOURCE_ENDPOINTS[source], {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ month }),
+    });
+
+    if (!response.ok) {
+      const errBody: SyncErrorResponse = await response.json().catch(
+        () => ({ error: `HTTP ${response.status}`, code: "MCP_ERROR" as const })
+      );
+      errors.push({ source, error: errBody.error });
+      setProgress((prev) => ({
+        ...prev,
+        errors: [...prev.errors, { source, error: errBody.error }],
+      }));
+      return;
+    }
+
+    const data: { result: SyncSourceResult } = await response.json();
+    completed.push(data.result);
+    setProgress((prev) => ({
+      ...prev,
+      completed: [...prev.completed, data.result],
+    }));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Error de red";
+    errors.push({ source, error: msg });
+    setProgress((prev) => ({
+      ...prev,
+      errors: [...prev.errors, { source, error: msg }],
+    }));
+  }
+}
+
+/**
+ * Sync Gmail with cursor-based pagination.
+ * POSTs in a loop while the server returns `next !== null`, accumulating
+ * partial sub-source results (one SyncSourceResult per gmail sub-source).
+ */
+async function syncGmail(
+  month: string,
+  completed: SyncSourceResult[],
+  errors: Array<{ source: ClientSyncSource; error: string }>,
+  setProgress: React.Dispatch<React.SetStateAction<SyncProgress>>
+) {
+  let cursor: GmailSyncCursor | undefined;
+
+  try {
+    while (true) {
+      const body: { month: string; cursor?: GmailSyncCursor } = { month };
+      if (cursor) body.cursor = cursor;
+
+      const response = await fetch(GMAIL_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errBody: SyncErrorResponse = await response.json().catch(
+          () => ({ error: `HTTP ${response.status}`, code: "GMAIL_API_ERROR" as const })
+        );
+        errors.push({ source: "sync_gmail", error: errBody.error });
+        setProgress((prev) => ({
+          ...prev,
+          errors: [...prev.errors, { source: "sync_gmail", error: errBody.error }],
+        }));
+        return;
+      }
+
+      const data: GmailSyncResponse = await response.json();
+
+      // Merge partial results into completed: accumulate per sub-source
+      for (const result of data.results) {
+        const existing = completed.find((r) => r.source === result.source);
+        if (existing) {
+          existing.found += result.found;
+          existing.inserted += result.inserted;
+          existing.duplicates += result.duplicates;
+          existing.needs_review += result.needs_review;
+          existing.errors.push(...result.errors);
+        } else {
+          completed.push({ ...result });
+        }
+      }
+
+      // Update progress with merged state
+      setProgress((prev) => ({
+        ...prev,
+        completed: [...completed],
+      }));
+
+      // If no more pages, we're done
+      if (!data.next) break;
+      cursor = data.next;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Error de red";
+    errors.push({ source: "sync_gmail", error: msg });
+    setProgress((prev) => ({
+      ...prev,
+      errors: [...prev.errors, { source: "sync_gmail", error: msg }],
+    }));
+  }
 }

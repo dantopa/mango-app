@@ -4,8 +4,8 @@ import * as React from "react";
 import { RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 import { useSync } from "@/hooks/use-sync";
-import type { SyncSource, SyncSourceResult } from "@/lib/sync/types";
-import { ERROR_MESSAGES } from "@/lib/sync/types";
+import type { ClientSyncSource, SyncSourceResult } from "@/lib/sync/types";
+
 import { formatMonth } from "@/lib/format";
 import {
   Dialog,
@@ -28,10 +28,17 @@ interface SyncDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const SOURCES: { id: SyncSource; label: string }[] = [
+const SOURCES: { id: ClientSyncSource; label: string }[] = [
   { id: "sync_bancolombia", label: "Bancolombia" },
   { id: "sync_nexo", label: "Nexo Card" },
+  { id: "sync_gmail", label: "Gmail" },
 ];
+
+const GMAIL_SUB_SOURCE_LABELS: Record<string, string> = {
+  sync_gmail_bancolombia: "Gmail · Bancolombia",
+  sync_gmail_rappicard: "Gmail · RappiCard",
+  sync_gmail_arriendo: "Gmail · Arriendo",
+};
 
 function getCurrentMonth(): string {
   const now = new Date();
@@ -51,13 +58,23 @@ function getMonthOptions(): string[] {
 export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
   const { startSync, progress, reset } = useSync();
   const [month, setMonth] = React.useState(getCurrentMonth);
-  const [selectedSources, setSelectedSources] = React.useState<Set<SyncSource>>(
+  const [selectedSources, setSelectedSources] = React.useState<Set<ClientSyncSource>>(
     new Set(SOURCES.map((s) => s.id))
   );
+  const [gmailConnected, setGmailConnected] = React.useState<boolean | null>(null);
 
-  const monthOptions = React.useMemo(getMonthOptions, []);
+  React.useEffect(() => {
+    if (open) {
+      fetch("/api/gmail/status")
+        .then((r) => r.json())
+        .then((d) => setGmailConnected(d.connected))
+        .catch(() => setGmailConnected(false));
+    }
+  }, [open]);
 
-  function toggleSource(source: SyncSource) {
+  const monthOptions = React.useMemo(() => getMonthOptions(), []);
+
+  function toggleSource(source: ClientSyncSource) {
     setSelectedSources((prev) => {
       const next = new Set(prev);
       if (next.has(source)) next.delete(source);
@@ -122,17 +139,32 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium">Fuentes</label>
               <div className="flex flex-col gap-2">
-                {SOURCES.map((s) => (
-                  <label key={s.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={selectedSources.has(s.id)}
-                      onChange={() => toggleSource(s.id)}
-                      className="size-4 rounded border-border"
-                    />
-                    {s.label}
-                  </label>
-                ))}
+                {SOURCES.map((s) => {
+                  if (s.id === "sync_gmail" && !gmailConnected) {
+                    return (
+                      <div key={s.id} className="flex items-center gap-2 text-sm">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => (window.location.href = "/api/gmail/auth")}
+                        >
+                          Conectar Gmail
+                        </Button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <label key={s.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selectedSources.has(s.id)}
+                        onChange={() => toggleSource(s.id)}
+                        className="size-4 rounded border-border"
+                      />
+                      {s.label}
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
@@ -153,7 +185,9 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
                 <Loader2 className="size-4 animate-spin text-primary" />
                 <span>
                   Sincronizando{" "}
-                  {SOURCES.find((s) => s.id === progress.current_source)?.label ?? "..."}
+                  {GMAIL_SUB_SOURCE_LABELS[progress.current_source] ??
+                    SOURCES.find((s) => s.id === progress.current_source)?.label ??
+                    "..."}
                 </span>
               </div>
             )}
@@ -164,7 +198,10 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
               <div key={e.source} className="flex items-center gap-2 text-sm text-destructive">
                 <AlertCircle className="size-4" />
                 <span>
-                  {SOURCES.find((s) => s.id === e.source)?.label}: {e.error}
+                  {GMAIL_SUB_SOURCE_LABELS[e.source] ??
+                    SOURCES.find((s) => s.id === e.source)?.label ??
+                    e.source}
+                  : {e.error}
                 </span>
               </div>
             ))}
@@ -181,7 +218,10 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
               <div key={e.source} className="flex items-center gap-2 text-sm text-destructive">
                 <AlertCircle className="size-4" />
                 <span>
-                  {SOURCES.find((s) => s.id === e.source)?.label}: {e.error}
+                  {GMAIL_SUB_SOURCE_LABELS[e.source] ??
+                    SOURCES.find((s) => s.id === e.source)?.label ??
+                    e.source}
+                  : {e.error}
                 </span>
               </div>
             ))}
@@ -216,7 +256,10 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
 }
 
 function SourceResult({ result }: { result: SyncSourceResult }) {
-  const label = SOURCES.find((s) => s.id === result.source)?.label ?? result.source;
+  const label =
+    GMAIL_SUB_SOURCE_LABELS[result.source] ??
+    SOURCES.find((s) => s.id === result.source)?.label ??
+    result.source;
   const hasErrors = result.errors.length > 0;
   return (
     <div className="flex items-start gap-2 text-sm">

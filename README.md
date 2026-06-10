@@ -155,11 +155,110 @@ RLS activado en todas las tablas: cada usuario sólo ve/escribe sus filas. El
 
 1. Push del repo a GitHub.
 2. En Vercel: **New Project** → importá el repo.
-3. Cargá las env vars (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
+3. Cargá las env vars (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `SYNC_CRON_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+   `GOOGLE_OAUTH_REDIRECT_URI`).
 4. En Supabase → **Authentication → URL Configuration**, agregá tu dominio de
    Vercel a *Site URL* y *Redirect URLs* (`https://tu-app.vercel.app/auth/callback`)
    para que el magic link funcione.
 5. Deploy. Build command y output son los de Next.js por defecto.
+
+### Cron Job
+
+`vercel.json` configura un cron diario a las 09:00 UTC (04:00 Bogotá) que ejecuta
+`GET /api/sync/cron`. El endpoint sincroniza Bancolombia, Nexo y Gmail para el
+mes corriente (y el anterior si estamos dentro de los primeros 5 días).
+
+La autenticación es vía header `Authorization: Bearer <SYNC_CRON_SECRET>`.
+Generá un token seguro (e.g. `openssl rand -hex 32`) y guardalo en Vercel como
+env var `SYNC_CRON_SECRET`.
+
+## Gmail Sync
+
+El sistema sincroniza automáticamente emails transaccionales de Gmail y los
+convierte en gastos. Las fuentes actuales son Bancolombia (alertas), RappiCard
+(resúmenes de transacción) y Arriendo (confirmaciones de Palomma).
+
+### Setup de Google Cloud
+
+1. Crear un proyecto en [Google Cloud Console](https://console.cloud.google.com/).
+2. Habilitar la **Gmail API** desde *APIs & Services → Library*.
+3. Crear un **OAuth client** tipo *Web application* en *Credentials*.
+4. Agregar las redirect URIs autorizadas:
+   - `http://localhost:3000/api/gmail/callback` (desarrollo local)
+   - `https://<tu-dominio>.vercel.app/api/gmail/callback` (producción)
+5. Configurar las variables de entorno (ver sección siguiente).
+6. El proyecto puede quedarse en modo **"Testing"** (sin verificación de Google)
+   — alcanza con agregar el email del owner como test user en la pantalla de
+   consentimiento OAuth.
+
+### Variables de entorno (Gmail)
+
+Agregar en `.env.local` (desarrollo) y en Vercel (producción):
+
+| Variable | Descripción |
+|---|---|
+| `GOOGLE_CLIENT_ID` | Client ID del OAuth client creado en Google Cloud |
+| `GOOGLE_CLIENT_SECRET` | Client secret del mismo |
+| `GOOGLE_OAUTH_REDIRECT_URI` | URI de callback completa, e.g. `https://<app>.vercel.app/api/gmail/callback` |
+
+### Cómo agregar una nueva fuente Gmail
+
+Cada fuente de email es un archivo independiente en `src/lib/sync/gmail/sources/`
+que exporta un `GmailSourceDef`. Para agregar una nueva:
+
+1. **Crear el archivo** en `src/lib/sync/gmail/sources/<nombre>.ts` exportando un
+   objeto que implemente `GmailSourceDef`:
+
+   ```ts
+   import type { GmailSourceDef } from "../types";
+
+   export const miFuenteDef: GmailSourceDef = {
+     id: "mi-fuente",           // identificador único
+     syncSource: "sync_gmail_mi_fuente",
+     accountName: "MiCuenta",   // debe existir en la tabla accounts
+     closeItemSource: null,     // o el nombre para monthly_close_items
+     buildQuery(month) {
+       const [y, m] = month.split("-");
+       const after = `${y}/${m}/01`;
+       // calcular el primer día del mes siguiente...
+       return `from:(remitente@ejemplo.com) after:${after} before:${before}`;
+     },
+     parse(email) {
+       // Extraer datos del email y devolver CandidateTransaction[]
+       // Devolver [] si no es transaccional (under-count: ante la duda, no insertar)
+       return [];
+     },
+   };
+   ```
+
+2. **Definir `buildQuery(month)`** con el remitente (`from:`) y el rango de
+   fechas (`after:/before:`) para limitar la búsqueda al mes indicado.
+
+3. **Implementar `parse(email)`** devolviendo `CandidateTransaction[]` con los
+   campos `amount_native`, `merchant`, `tx_date`, `native_currency`,
+   `description_raw`. Devolver `[]` para emails no transaccionales o si no se
+   puede extraer la data con confianza.
+
+4. **Registrar la fuente** en `src/lib/sync/gmail/sources/index.ts` agregándola
+   al array `GMAIL_SOURCES`. El **orden importa**: las fuentes que corren primero
+   tienen prioridad en dedup cross-fuente (ej: Arriendo corre antes que
+   Bancolombia para evitar doble conteo del pago de alquiler).
+
+5. **Agregar fixtures y tests** en `src/lib/sync/gmail/__fixtures__/` con bodies
+   de ejemplo sanitizados, y tests unitarios que cubran las variantes del parser.
+
+### BBVA (fuera de alcance v1)
+
+El slot `sync_gmail_bbva` está reservado para una futura implementación. Estado
+actual:
+
+- BBVA **no adjunta el PDF del extracto** en el email — solo envía un link
+  tokenizado a `online.bbva.com.ar` que requiere sesión activa, por lo que no
+  es parseable automáticamente desde Gmail.
+- **Posible v2**: parsear los avisos "TRANSFERENCIA INMEDIATA DEBITADA" de
+  `avisos@bbva.com.ar` como señal parcial de gastos en ARS.
+- **Alternativa**: upload manual del PDF del extracto (fuera de Gmail sync).
 
 ## Estructura
 
@@ -176,6 +275,7 @@ src/
   lib/
     analytics.ts       # cálculos puros (patrimonio, gastos, proyección de objetivos)
     supabase/          # clients (browser/server), middleware, tipos generados
+    sync/gmail/        # fuentes Gmail (parsers, orquestador, OAuth)
     format.ts schemas.ts colors.ts utils.ts
 supabase/
   migrations/          # schema + RLS
