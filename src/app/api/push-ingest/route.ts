@@ -5,17 +5,10 @@ import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
-import type { IngestMode } from "@/lib/push-ingest/types";
 
 const OWNER_USER_ID =
   process.env.MAQUINITA_OWNER_USER_ID ??
   "49b33f55-dcf2-4370-ba9a-204b91f2551d";
-
-/** Resolve the ingest mode from env — anything other than "full_pipeline" defaults to "log_only" */
-function resolveMode(): IngestMode {
-  const raw = process.env.PUSH_INGEST_MODE;
-  return raw === "full_pipeline" ? "full_pipeline" : "log_only";
-}
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
@@ -49,46 +42,31 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "invalid_json" }, { status: 400 });
     }
 
-    // 5. Zod validation — in log_only mode, accept any JSON object
-    const mode = resolveMode();
-    
-    if (mode === "log_only") {
-      // Phase 0: accept any JSON, don't validate schema — we need to SEE what the forwarder sends
-      const payload = body as Record<string, unknown>;
-      const packageName = String(payload.packageName ?? payload.appName ?? payload.package ?? "unknown");
+    // 5. Always save raw log first (so we never lose a notification)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawPayload = body as Record<string, unknown>;
+    const packageName = String(rawPayload.packageName ?? rawPayload.appName ?? rawPayload.package ?? "unknown");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase = getSupabaseAdmin() as any;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const supabase = getSupabaseAdmin() as any;
-      const { error: insertError } = await supabase
-        .from("push_raw_log")
-        .insert({
-          user_id: OWNER_USER_ID,
-          package_name: packageName,
-          payload: payload,
-          received_at: new Date().toISOString(),
-        });
+    await supabase
+      .from("push_raw_log")
+      .insert({
+        user_id: OWNER_USER_ID,
+        package_name: packageName,
+        payload: rawPayload,
+        received_at: new Date().toISOString(),
+      });
 
-      if (insertError) {
-        console.error("[push-ingest] raw log insert failed:", JSON.stringify(insertError));
-        return NextResponse.json({ error: "log_failed", detail: insertError.message }, { status: 500 });
-      }
-
-      return NextResponse.json({ status: "logged" });
-    }
-
-    // full_pipeline mode — strict validation
+    // 6. Validate and run pipeline
     const parseResult = pushPayloadSchema.safeParse(body);
     if (!parseResult.success) {
-      return NextResponse.json(
-        { errors: parseResult.error.flatten().fieldErrors },
-        { status: 422 },
-      );
+      // Logged raw but can't process — respond 200 (notification is safe)
+      return NextResponse.json({ status: "logged", parse_errors: parseResult.error.flatten().fieldErrors });
     }
 
     const payload = parseResult.data;
-
-    // 9. full_pipeline mode — execute the full pipeline
-    const result = await executePipeline(payload, mode);
+    const result = await executePipeline(payload, "full_pipeline");
     return NextResponse.json(result);
   } catch {
     return NextResponse.json(
