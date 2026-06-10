@@ -175,3 +175,90 @@ function getMonthEnd(month: string): string {
   const lastDay = new Date(year, m, 0).getDate();
   return `${month}-${String(lastDay).padStart(2, "0")}`;
 }
+
+/**
+ * Re-categoriza transacciones sin categoría del mes usando reglas + AI.
+ * También re-clasifica transferencias si hay reglas nuevas.
+ * Se ejecuta al final del sync para limpiar pendientes de corridas previas.
+ */
+export async function recategorizeMonth(
+  userId: string,
+  month: string
+): Promise<{ updated: number; classified: number }> {
+  const supabase = getSupabaseAdmin();
+  const monthStart = `${month}-01`;
+  const monthEnd = getMonthEnd(month);
+
+  let updated = 0;
+  let classified = 0;
+
+  // 1. Re-categorize transactions without category
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: uncategorized } = await (supabase as any)
+    .from("transactions")
+    .select("id, merchant, description_raw")
+    .eq("user_id", userId)
+    .is("category_id", null)
+    .gte("tx_date", monthStart)
+    .lte("tx_date", monthEnd);
+
+  if (uncategorized && uncategorized.length > 0) {
+    for (const tx of uncategorized as Array<{ id: string; merchant: string | null; description_raw: string }>) {
+      if (!tx.merchant) continue;
+
+      // Try deterministic rules first
+      const ruleResult = await categorize(tx.merchant, userId);
+      if (ruleResult.matched) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from("transactions")
+          .update({ category_id: ruleResult.category_id, needs_review: false })
+          .eq("id", tx.id);
+        updated++;
+        continue;
+      }
+
+      // AI fallback
+      const aiResult = await categorizeWithAi(tx.merchant, tx.description_raw, userId);
+      if (aiResult.matched) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from("transactions")
+          .update({ category_id: aiResult.category_id, needs_review: false })
+          .eq("id", tx.id);
+        updated++;
+      }
+    }
+  }
+
+  // 2. Re-classify transactions that are not yet marked as transfers
+  //    (catches cases where rules were added after initial insert)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: unclassified } = await (supabase as any)
+    .from("transactions")
+    .select("id, merchant, description_raw, is_payment")
+    .eq("user_id", userId)
+    .eq("is_payment", false)
+    .gte("tx_date", monthStart)
+    .lte("tx_date", monthEnd);
+
+  if (unclassified && unclassified.length > 0) {
+    for (const tx of unclassified as Array<{ id: string; merchant: string | null; description_raw: string; is_payment: boolean }>) {
+      const classification = await classifyTransaction(
+        { merchant: tx.merchant, description_raw: tx.description_raw },
+        userId
+      );
+
+      if (classification.type === "transfer") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from("transactions")
+          .update({ is_payment: true })
+          .eq("id", tx.id);
+        classified++;
+      }
+    }
+  }
+
+  return { updated, classified };
+}

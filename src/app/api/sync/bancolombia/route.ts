@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { callMcpTool, McpError } from "@/lib/sync/mcp-client";
 import { adaptBancolombia } from "@/lib/sync/adapters/bancolombia";
-import { processCandidates } from "@/lib/sync/sync-engine";
+import { processCandidates, recategorizeMonth } from "@/lib/sync/sync-engine";
 import type { SyncRequest, SyncErrorResponse } from "@/lib/sync/types";
 
 /**
@@ -80,6 +80,12 @@ export async function POST(request: NextRequest) {
 
     // 5. Process via sync-engine
     const result = await processCandidates(candidates, user.id, month);
+
+    // 6. Re-categorize & re-classify any uncategorized transactions from this month
+    const recat = await recategorizeMonth(user.id, month);
+    if (recat.updated > 0 || recat.classified > 0) {
+      console.log(`[sync/bancolombia] recategorized: ${recat.updated} updated, ${recat.classified} reclassified`);
+    }
 
     return NextResponse.json({ result });
   } catch (err) {
