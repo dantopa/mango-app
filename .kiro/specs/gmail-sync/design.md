@@ -4,18 +4,6 @@
 
 Gmail se integra como **tercera familia de fuentes** del sync engine existente. La novedad es exclusivamente la capa de adquisición (OAuth + Gmail API + parsers de email); todo lo demás (dedup, FX, clasificación, categorización, insert, UI de progreso) se reutiliza.
 
-```
-                 ┌─────────────────────────────────────────────┐
-                 │           YA EXISTE (se reutiliza)           │
- Gmail API ──▶ parsers ──▶ CandidateTransaction[] ──▶ processCandidates()
-                 │             │                        ├─ evaluateCandidate (dedup-sync + fuzzy-matcher)
-                 │             │                        ├─ resolveRate / calculateUsd (fx)
-                 │             │                        ├─ classifyTransaction (transfer rules)
-                 │             │                        ├─ categorize (merchant rules)
-                 │             │                        └─ insert → transactions
-                 └─────────────────────────────────────────────┘
-```
-
 ### Decisiones resueltas (preguntas del pedido)
 
 | Pregunta | Decisión | Por qué |
@@ -78,7 +66,7 @@ Método de pago: Cuenta Bancolombia
 Valor total: $ 1.900.000
 ```
 
-⚠️ El mismo pago genera el email Bancolombia "Transferiste $1900000.00 por Boton Bancolombia a PALOMMA SAS" (mismo monto, misma fecha). Ver §Dedup.
+⚠️ El mismo pago genera el email Bancolombia "Transferiste $1900000.00 por Boton Bancolombia a PALOMMA SAS" (mismo monto, misma fecha). Ver sección de dedup cross-fuente.
 
 #### BBVA — `avisos@bbva.com.ar` (fuera de alcance v1)
 
@@ -86,38 +74,19 @@ Valor total: $ 1.900.000
 
 ## Architecture
 
-### Estructura de archivos
-
 ```
-src/lib/sync/
-  types.ts                      [MODIFICAR] SyncSource += gmail sources; tipos de cursor
-  gmail/
-    types.ts                    [NUEVO] GmailSourceDef, GmailMessage, GmailSyncCursor
-    token-store.ts              [NUEVO] get/store refresh token (Vault RPCs)
-    client.ts                   [NUEVO] Gmail REST client: refresh, list, get
-    html-to-text.ts             [NUEVO] strip HTML → texto plano normalizado
-    money.ts                    [NUEVO] parseCopAmount + normalizeDate (extraídos de push-ingest)
-    orchestrator.ts             [NUEVO] runGmailSource(): list → filter procesados → parse → processCandidates → log → close item
-    sources/
-      index.ts                  [NUEVO] registry: GMAIL_SOURCES (orden de ejecución)
-      bancolombia.ts            [NUEVO] query + parser
-      rappicard.ts              [NUEVO] query + parser
-      arriendo.ts               [NUEVO] query + parser
-src/app/api/gmail/auth/route.ts       [NUEVO] inicia OAuth
-src/app/api/gmail/callback/route.ts   [NUEVO] guarda refresh token en Vault
-src/app/api/gmail/status/route.ts     [NUEVO] GET → { connected: boolean }
-src/app/api/sync/gmail/route.ts       [NUEVO] POST { month, sources?, cursor? }
-src/app/api/sync/cron/route.ts        [MODIFICAR] agrega paso Gmail
-src/hooks/use-sync.ts                 [MODIFICAR] endpoint gmail + loop de cursor
-src/components/sync-dialog.tsx        [MODIFICAR] checkbox Gmail + sub-resultados + CTA conectar
-supabase/migrations/20260101000009_gmail_vault_rpc.sql  [NUEVO]
+                 ┌─────────────────────────────────────────────┐
+                 │           YA EXISTE (se reutiliza)           │
+ Gmail API ──▶ parsers ──▶ CandidateTransaction[] ──▶ processCandidates()
+                 │             │                        ├─ evaluateCandidate (dedup-sync + fuzzy-matcher)
+                 │             │                        ├─ resolveRate / calculateUsd (fx)
+                 │             │                        ├─ classifyTransaction (transfer rules)
+                 │             │                        ├─ categorize (merchant rules)
+                 │             │                        └─ insert → transactions
+                 └─────────────────────────────────────────────┘
 ```
 
-Convención AGENTS.md: antes de tocar route handlers/proxy, leer las guías de `node_modules/next/dist/docs/` (Next 16 tiene breaking changes).
-
-### OAuth y manejo de tokens
-
-#### Flow (one-time)
+### OAuth Flow (one-time)
 
 ```mermaid
 sequenceDiagram
@@ -140,7 +109,7 @@ sequenceDiagram
     C-->>U: 302 /?gmail=connected
 ```
 
-#### Acceso runtime
+### Runtime Token Access
 
 ```mermaid
 sequenceDiagram
@@ -161,48 +130,7 @@ sequenceDiagram
     S->>API: users.messages.list / get (Bearer access_token)
 ```
 
-#### Vault (migración `20260101000009`)
-
-`vault` no está expuesto por PostgREST, así que el acceso es vía RPCs en `public`:
-
-```sql
-create or replace function public.vault_upsert_secret(p_name text, p_secret text)
-returns void language plpgsql security definer set search_path = '' as $$
-begin
-  if exists (select 1 from vault.secrets where name = p_name) then
-    perform vault.update_secret((select id from vault.secrets where name = p_name), p_secret);
-  else
-    perform vault.create_secret(p_secret, p_name);
-  end if;
-end $$;
-
-create or replace function public.vault_get_secret(p_name text)
-returns text language sql security definer set search_path = '' as $$
-  select decrypted_secret from vault.decrypted_secrets where name = p_name;
-$$;
-
-revoke execute on function public.vault_upsert_secret(text, text) from public, anon, authenticated;
-revoke execute on function public.vault_get_secret(text) from public, anon, authenticated;
-grant  execute on function public.vault_upsert_secret(text, text) to service_role;
-grant  execute on function public.vault_get_secret(text) to service_role;
-```
-
-Nombre del secreto: `gmail_refresh_token` (app single-user; si algún día hay multiusuario, sufijo `_<user_id>`).
-
-Env vars nuevas: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI` (p.ej. `https://<app>.vercel.app/api/gmail/callback`).
-
-#### Cliente Gmail (`client.ts`)
-
-REST puro con `fetch` (sin SDK `googleapis`, que pesa ~10MB y no aporta en serverless):
-
-- `refreshAccessToken(): Promise<string>` — POST `oauth2.googleapis.com/token`; mapea `invalid_grant` → `GmailAuthError`.
-- `listMessageIds(q, pageToken?)` — `GET /gmail/v1/users/me/messages?q=...&maxResults=100`.
-- `getMessage(id)` — `GET .../messages/{id}?format=full`; decodifica base64url; devuelve `ParsedEmail` (prefiere parte `text/plain`, si no `html-to-text(text/html)`).
-- Timeout 10s por llamada (AbortController, mismo patrón que `mcp-client.ts`); 429/5xx → un retry con backoff 1s, después error.
-
-### Pipeline de sincronización
-
-#### Orquestador (`orchestrator.ts`)
+### Sync Pipeline (Orchestrator)
 
 ```
 runGmailMonth(month, sources, cursor?, budgetMs≈20000):
@@ -222,15 +150,15 @@ runGmailMonth(month, sources, cursor?, budgetMs≈20000):
 
 **Orden de fuentes**: `arriendo` corre primero a propósito — así la confirmación de Palomma (metadata rica, `expense_type: "fixed"`) entra antes de que el email Bancolombia "Transferiste … a PALOMMA SAS" llegue al dedup, donde cae en `same_amount_date_different_merchant → insert_review` o queda neutralizado por la regla allowlist `PALOMMA` (seed en la migración: `transfer_classification_rules` con pattern `PALOMMA`, list_type `allowlist` → `is_payment = true`, no computa gasto).
 
-#### Idempotencia (capa nueva, encima del engine)
+### Idempotencia (capa nueva, encima del engine)
 
 - `dedup_key = sha256("gmail|" + messageId).slice(0, 32)` — determinístico, PK de `push_ingest_log`.
 - Estados reutilizados del CHECK constraint existente: `registered` (insertado), `duplicate` (dedup lo descartó o re-run), `no_parser` (no transaccional / parse fallido, motivo en `error_message`), `transfer` (ingreso o transferencia pura), `registration_failed`.
 - El filtro previo (paso 2) hace el re-run barato: re-correr un mes ya cargado = 1 list + 1 query, 0 gets.
 
-#### Dedup cross-fuente: escalera determinista (Wave 7, pendiente)
+### Dedup Cross-Fuente: Escalera Determinista (Wave 7)
 
-**El problema.** Las push notifications insertan en tiempo real; Gmail re-lee el mismo mes después. El mismo gasto llega por 2–3 canales (wallet push + push Bancolombia + email Bancolombia; o wallet push + email RappiCard) con merchant truncado distinto y fecha potencialmente corrida. La resolución es **determinista por escalera de claves de identidad** — sin LLM en el camino crítico (Req 10.4).
+**El problema.** Las push notifications insertan en tiempo real; Gmail re-lee el mismo mes después. El mismo gasto llega por 2–3 canales (wallet push + push Bancolombia + email Bancolombia; o wallet push + email RappiCard) con merchant truncado distinto y fecha potencialmente corrida. La resolución es **determinista por escalera de claves de identidad** — sin LLM en el camino crítico.
 
 **Agujeros verificados en `evaluateCandidate` / `fuzzy-matcher` actuales** (contra código y datos reales):
 
@@ -269,11 +197,7 @@ Choques cubiertos:
 | Email RappiCard vs gasto manual mismo monto+fecha | nivel 4 — `insert_review` (under-count: entra marcado) |
 | Email Arriendo ("Arriendo") vs transferencia Bancolombia ("PALOMMA SAS") | arriendo entra primero; Bancolombia → nivel 4 + allowlist `PALOMMA` lo marca `is_payment` |
 
-**¿Por qué no un LLM para decidir "es la misma compra"?** Un juez probabilístico en el camino crítico puede equivocarse en silencio: un falso "duplicado" = gasto perdido sin rastro (rompe under-count auditable), agrega latencia/costo dentro del presupuesto de ~25s y no es reproducible entre corridas. La escalera determinista + `needs_review` deja el residuo ambiguo visible para el humano. El `ai-categorizer` implementado no contradice esto: categorizar es bajo riesgo y converge a determinista. **v2 opcional** (Req 10.4): asistente LLM solo sobre lo ya insertado con `needs_review`, sugiriendo sin descartar autónomamente.
-
-### `expense_type` para arriendo
-
-`processCandidates` hardcodea `expense_type: "variable"`. Cambio mínimo en el engine: `CandidateTransaction` gana un campo opcional `expense_type?: "fixed" | "variable"` (default `"variable"`), que el insert respeta. Es la única modificación de comportamiento al engine existente.
+**¿Por qué no un LLM para decidir "es la misma compra"?** Un juez probabilístico en el camino crítico puede equivocarse en silencio: un falso "duplicado" = gasto perdido sin rastro (rompe under-count auditable), agrega latencia/costo dentro del presupuesto de ~25s y no es reproducible entre corridas. La escalera determinista + `needs_review` deja el residuo ambiguo visible para el humano. El `ai-categorizer` implementado no contradice esto: categorizar es bajo riesgo y converge a determinista. **v2 opcional**: asistente LLM solo sobre lo ya insertado con `needs_review`, sugiriendo sin descartar autónomamente.
 
 ### Route Handlers
 
@@ -304,9 +228,47 @@ Después de los pasos Bancolombia/Nexo existentes, agrega un paso Gmail: itera `
 - Durante el run, los resultados parciales de Gmail se renderizan como sub-filas: "Gmail · Bancolombia — 42 encontradas · 3 nuevas · 39 duplicados". Reutiliza `SourceResult` con labels `"Gmail · <Fuente>"`.
 - Textos en español (convención del proyecto).
 
+### Security
+
+- Scope mínimo: `gmail.readonly`. Sin labels, sin escritura.
+- Refresh token: solo en Vault, RPCs solo-service-role, jamás serializado a respuestas ni logs.
+- `state` CSRF en OAuth (cookie httpOnly, SameSite=Lax, TTL 10 min).
+- Route handlers de sync: sesión Supabase (igual que los existentes); cron: `SYNC_CRON_SECRET`.
+- Bodies de email: solo se persiste `description_raw` (la oración transaccional), no el email completo.
+- `client_secret` de Google solo en env vars de Vercel.
+
 ## Components and Interfaces
 
-### Tipos e interfaces
+### File Structure
+
+```
+src/lib/sync/
+  types.ts                      [MODIFICAR] SyncSource += gmail sources; tipos de cursor
+  gmail/
+    types.ts                    [NUEVO] GmailSourceDef, GmailMessage, GmailSyncCursor
+    token-store.ts              [NUEVO] get/store refresh token (Vault RPCs)
+    client.ts                   [NUEVO] Gmail REST client: refresh, list, get
+    html-to-text.ts             [NUEVO] strip HTML → texto plano normalizado
+    money.ts                    [NUEVO] parseCopAmount + normalizeDate (extraídos de push-ingest)
+    orchestrator.ts             [NUEVO] runGmailSource(): list → filter procesados → parse → processCandidates → log → close item
+    sources/
+      index.ts                  [NUEVO] registry: GMAIL_SOURCES (orden de ejecución)
+      bancolombia.ts            [NUEVO] query + parser
+      rappicard.ts              [NUEVO] query + parser
+      arriendo.ts               [NUEVO] query + parser
+src/app/api/gmail/auth/route.ts       [NUEVO] inicia OAuth
+src/app/api/gmail/callback/route.ts   [NUEVO] guarda refresh token en Vault
+src/app/api/gmail/status/route.ts     [NUEVO] GET → { connected: boolean }
+src/app/api/sync/gmail/route.ts       [NUEVO] POST { month, sources?, cursor? }
+src/app/api/sync/cron/route.ts        [MODIFICAR] agrega paso Gmail
+src/hooks/use-sync.ts                 [MODIFICAR] endpoint gmail + loop de cursor
+src/components/sync-dialog.tsx        [MODIFICAR] checkbox Gmail + sub-resultados + CTA conectar
+supabase/migrations/20260101000009_gmail_vault_rpc.sql  [NUEVO]
+```
+
+Convención AGENTS.md: antes de tocar route handlers/proxy, leer las guías de `node_modules/next/dist/docs/` (Next 16 tiene breaking changes).
+
+### Types and Interfaces
 
 ```ts
 // src/lib/sync/types.ts (modificación)
@@ -353,6 +315,8 @@ export interface GmailSyncResponse {
 }
 ```
 
+### CandidateTransaction Extensions
+
 `CandidateTransaction` gana dos campos opcionales (backward-compatible):
 
 ```ts
@@ -363,91 +327,124 @@ export interface CandidateTransaction {
 }
 ```
 
+### Gmail Client (`client.ts`)
+
+REST puro con `fetch` (sin SDK `googleapis`, que pesa ~10MB y no aporta en serverless):
+
+- `refreshAccessToken(): Promise<string>` — POST `oauth2.googleapis.com/token`; mapea `invalid_grant` → `GmailAuthError`.
+- `listMessageIds(q, pageToken?)` — `GET /gmail/v1/users/me/messages?q=...&maxResults=100`.
+- `getMessage(id)` — `GET .../messages/{id}?format=full`; decodifica base64url; devuelve `ParsedEmail` (prefiere parte `text/plain`, si no `html-to-text(text/html)`).
+- Timeout 10s por llamada (AbortController, mismo patrón que `mcp-client.ts`); 429/5xx → un retry con backoff 1s, después error.
+
 ## Data Models
 
-### Tablas (sin cambios de schema, solo nuevos registros)
+### Vault RPCs (Migration `20260101000009`)
 
-- **`push_ingest_log`** — se reutiliza para idempotencia de Gmail:
-  - `dedup_key`: `sha256("gmail|" + gmail_message_id).slice(0, 32)` (PK existente)
-  - `package_name`: `"gmail.bancolombia"` | `"gmail.rappicard"` | `"gmail.arriendo"`
-  - `status`: `registered` | `duplicate` | `no_parser` | `transfer` | `registration_failed`
-  - `error_message`: motivo del descarte (nullable)
+`vault` no está expuesto por PostgREST, así que el acceso es vía RPCs en `public`:
 
-- **`transactions`** — destino final de los candidatos procesados (sin cambios de schema)
+```sql
+create or replace function public.vault_upsert_secret(p_name text, p_secret text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if exists (select 1 from vault.secrets where name = p_name) then
+    perform vault.update_secret((select id from vault.secrets where name = p_name), p_secret);
+  else
+    perform vault.create_secret(p_secret, p_name);
+  end if;
+end $$;
 
-- **`vault.secrets`** — almacena `gmail_refresh_token` (cifrado at-rest, solo accesible vía RPCs service_role)
+create or replace function public.vault_get_secret(p_name text)
+returns text language sql security definer set search_path = '' as $$
+  select decrypted_secret from vault.decrypted_secrets where name = p_name;
+$$;
 
-### Migración nueva (`20260101000009_gmail_vault_rpc.sql`)
+revoke execute on function public.vault_upsert_secret(text, text) from public, anon, authenticated;
+revoke execute on function public.vault_get_secret(text) from public, anon, authenticated;
+grant  execute on function public.vault_upsert_secret(text, text) to service_role;
+grant  execute on function public.vault_get_secret(text) to service_role;
+```
 
-RPCs `vault_upsert_secret` / `vault_get_secret` + seed de `transfer_classification_rules` (pattern `PALOMMA`, allowlist).
+Nombre del secreto: `gmail_refresh_token` (app single-user; si algún día hay multiusuario, sufijo `_<user_id>`).
 
-### Env vars nuevas
+### Environment Variables
 
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_OAUTH_REDIRECT_URI`
+- `GOOGLE_OAUTH_REDIRECT_URI` (p.ej. `https://<app>.vercel.app/api/gmail/callback`)
+
+### `expense_type` for Arriendo
+
+`processCandidates` hardcodea `expense_type: "variable"`. Cambio mínimo en el engine: `CandidateTransaction` gana un campo opcional `expense_type?: "fixed" | "variable"` (default `"variable"`), que el insert respeta. Es la única modificación de comportamiento al engine existente.
+
+### Existing Tables Used (no new tables)
+
+- `push_ingest_log` — registro de idempotencia por email (`dedup_key` PK)
+- `transactions` — destino final de gastos insertados
+- `accounts` — lookup de `account_id` por `accountName`
+- `monthly_close_items` — marcado automático post-sync
+- `transfer_classification_rules` — regla allowlist `PALOMMA` para evitar doble conteo
 
 ## Correctness Properties
 
 ### Property 1: Parsers totales y honestos
 
-*For any* string input (incluyendo basura/HTML malformado), `parse()` no lanza y devuelve `[]` o candidatos con `amount_native > 0`, `tx_date` matching `/^\d{4}-\d{2}-\d{2}$/` y `native_currency` no vacío. (Under-count: nunca un candidato con monto 0/NaN.)
-
 **Validates: Requirements 3.7, 4.2, 5.2**
 
-### Property 2: Montos CO round-trip
+∀ string (incluyendo basura/HTML malformado), `parse()` no lanza y devuelve `[]` o candidatos con `amount_native > 0`, `tx_date` matching `/^\d{4}-\d{2}-\d{2}$/` y `native_currency` no vacío. (Under-count: nunca un candidato con monto 0/NaN.)
 
-*For any* entero n > 0, `parseCopAmount(formatCO(n)) === n` para los tres formatos (`1.234,56`, `1234.56`, `1234`); y `parseCopAmount` nunca devuelve NaN para inputs `$[\d.,]+`.
+### Property 2: Montos CO roundtrip
 
 **Validates: Requirements 3.6, 4.4**
 
-### Property 3: Normalización de fechas
+∀ entero n > 0, `parseCopAmount(formatCO(n)) === n` para los tres formatos (`1.234,56`, `1234.56`, `1234`); y `parseCopAmount` nunca devuelve NaN para inputs `$[\d.,]+`.
 
-*For any* fecha válida, `normalizeDate("DD/MM/YY") === normalizeDate("DD/MM/YYYY")` y el resultado es ISO parseable.
+### Property 3: Fechas normalizadas
 
-**Validates: Requirements 3.1, 4.1, 5.1**
+**Validates: Requirements 3.1, 5.1**
+
+∀ fecha válida, `normalizeDate("DD/MM/YY") === normalizeDate("DD/MM/YYYY")` y el resultado es ISO parseable.
 
 ### Property 4: Idempotencia del dedup_key
 
-*For any* messageId, `gmailDedupKey(id)` es determinístico, 32 hex chars, e inyectivo para ids distintos (colisión solo por hash).
+**Validates: Requirements 6.1**
 
-**Validates: Requirements 6.1, 6.2**
+∀ messageId, `gmailDedupKey(id)` es determinístico, 32 hex chars, e inyectivo para ids distintos (colisión solo por hash).
 
 ### Property 5: Idempotencia end-to-end
 
-*For any* lista de emails procesada dos veces → segunda corrida `inserted === 0`.
+**Validates: Requirements 6.2, 6.3**
 
-**Validates: Requirements 6.2, 6.4**
+Integration test con Supabase mockeado: procesar la misma lista de emails dos veces → segunda corrida `inserted === 0`.
 
 ### Property 6: Fuzzy dedup conmutativo
 
-*For any* par de merchants, `compareMerchants(a, b) === compareMerchants(b, a)`. Caso documentado: "PALOMMA SAS" vs "Arriendo" → `no_match`.
-
 **Validates: Requirements 7.3, 5.4**
+
+Ya cubierto por `fuzzy-matcher`; agregar caso "PALOMMA SAS" vs "Arriendo" → `no_match` (documenta el comportamiento esperado del choque arriendo).
 
 ### Property 7: Token containment
 
-*For any* par (a, b) con tokens(norm(a)) ⊆ tokens(norm(b)) → `compareMerchants(a, b) === "match"`, y es conmutativo. Casos reales: ("DIDI", "DLO Didi"), ("MULTIPLEX", "MULTIPLEX VIVA ENVIG").
-
 **Validates: Requirements 7.8**
+
+∀ par (a, b) con tokens(norm(a)) ⊆ tokens(norm(b)) → `compareMerchants(a, b) === "match"`, y es conmutativo. Casos reales: ("DIDI", "DLO Didi"), ("MULTIPLEX", "MULTIPLEX VIVA ENVIG").
 
 ### Property 8: Ventana de fecha
 
-*For any* candidata con `tx_date` D y transacción existente con fecha D±1 + mismo monto + merchant match → `discard`; con fecha D±2 → `insert`.
+**Validates: Requirements 7.6, 7.12**
 
-**Validates: Requirements 7.6**
+Candidata con `tx_date` D y transacción existente con fecha D±1 + mismo monto + merchant match → `discard`; con fecha D±2 → `insert`. (Cubre el corrimiento UTC/Bogotá del wallet push.)
 
 ### Property 9: Multiplicidad conservadora
 
-*For any* M existentes equivalentes y N candidatas equivalentes en el batch, el resultado neto es exactamente max(0, N−M) inserciones — ni una más ni una menos.
-
 **Validates: Requirements 7.9**
+
+Con M existentes equivalentes y N candidatas equivalentes en el batch, el resultado neto es exactamente max(0, N−M) inserciones — ni una más (no duplica) ni una menos (no pierde la segunda compra real del mismo día).
 
 ### Property 10: last4 gana
 
-*For any* par donde `card_last4` coincide a ambos lados con monto igual y fecha en ventana, el veredicto es `discard` aun cuando `compareMerchants` diga `no_match`.
-
 **Validates: Requirements 7.7**
+
+Si `card_last4` coincide a ambos lados con monto igual y fecha en ventana, el veredicto es `discard` aun cuando `compareMerchants` diga `no_match`.
 
 ## Error Handling
 
@@ -464,43 +461,21 @@ RPCs `vault_upsert_secret` / `vault_get_secret` + seed de `transfer_classificati
 
 Principio transversal: un email problemático afecta solo a ese email; una sub-fuente caída afecta solo a esa sub-fuente.
 
-### Seguridad
-
-- Scope mínimo: `gmail.readonly`. Sin labels, sin escritura.
-- Refresh token: solo en Vault, RPCs solo-service-role, jamás serializado a respuestas ni logs.
-- `state` CSRF en OAuth (cookie httpOnly, SameSite=Lax, TTL 10 min).
-- Route handlers de sync: sesión Supabase (igual que los existentes); cron: `SYNC_CRON_SECRET`.
-- Bodies de email: solo se persiste `description_raw` (la oración transaccional), no el email completo.
-- `client_secret` de Google solo en env vars de Vercel.
-
 ## Testing Strategy
 
 Vitest (config existente). Fixtures: bodies reales sanitizados en `src/lib/sync/gmail/__fixtures__/*.txt|html`.
 
-### Unit tests con fixtures (por parser)
+### Unit Tests con Fixtures (por parser)
 
-- Bancolombia: 1 test por variante de la tabla (compra, pago, QR, Bre-b, transferencia, botón, ingreso→[], factura→[]).
+- Bancolombia: 1 test por variante de la tabla de formatos (compra, pago, QR, Bre-b, transferencia, botón, ingreso→[], factura→[]).
 - RappiCard: resumen de transacción → 1 candidato; email de extracto → []; marketing → [].
 - Arriendo: aprobado → 1 candidato `expense_type: fixed`; no aprobado → [].
 
-### Property-based tests (propiedades del sistema)
+### Property-Based Tests
 
-Propiedades 1–4 de la sección Correctness Properties.
+Se implementan las 10 correctness properties definidas arriba usando fast-check o similar generator library.
 
-### Integration tests
-
-- Propiedad 5: misma lista de emails dos veces (Supabase mockeado) → segunda corrida inserta 0.
-- Choque Palomma/Bancolombia verificando `insert_review` + `is_payment`.
-
-### Dedup hardening tests (Wave 7)
-
-Propiedades 7–10 de la sección Correctness Properties:
-- Token containment conmutativo.
-- Ventana de fecha ±1 día.
-- Multiplicidad conservadora.
-- last4 gana sobre merchant no_match.
-
-### Manual/E2E checklist (post-deploy)
+### Manual/E2E Checklist (post-deploy)
 
 1. Conectar Gmail → secreto aparece en Vault.
 2. Sync junio 2026 → comparar contra los emails reales del mes (conteo por sub-fuente).
