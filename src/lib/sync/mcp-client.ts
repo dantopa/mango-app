@@ -48,22 +48,46 @@ export async function callMcpTool(
     }
 
     if (!response.ok) {
-      throw new McpError("MCP_ERROR", `HTTP ${response.status}`);
+      // Try to extract a meaningful error message from the body
+      const errorText = await response.text().catch(() => "");
+      throw new McpError(
+        "MCP_ERROR",
+        errorText || `HTTP ${response.status}`
+      );
     }
 
-    const rpc = await response.json();
+    // Safely parse response as JSON — the edge function may return plain text errors
+    const responseText = await response.text();
+    let rpc: Record<string, unknown>;
+    try {
+      rpc = JSON.parse(responseText);
+    } catch {
+      throw new McpError(
+        "MCP_ERROR",
+        responseText.slice(0, 200) || "Respuesta no es JSON válido"
+      );
+    }
 
     if (rpc.error) {
-      throw new McpError("MCP_ERROR", rpc.error.message ?? "RPC error");
+      const rpcErr = rpc.error as { message?: string };
+      throw new McpError("MCP_ERROR", rpcErr.message ?? "RPC error");
     }
 
     // The result comes in rpc.result.content[0].text (JSON string)
-    const text = rpc.result?.content?.[0]?.text;
+    const result = rpc.result as { content?: Array<{ text?: string }> } | undefined;
+    const text = result?.content?.[0]?.text;
     if (!text) {
       throw new McpError("MCP_ERROR", "Empty response from MCP");
     }
 
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new McpError(
+        "MCP_ERROR",
+        text.slice(0, 200) || "Contenido MCP no es JSON válido"
+      );
+    }
   } catch (err) {
     if (err instanceof McpError) throw err;
 

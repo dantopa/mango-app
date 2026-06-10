@@ -31,14 +31,14 @@ export async function processCandidates(
 
   const supabase = getSupabaseAdmin();
 
-  // Resolve account_id for this source's account_name
+  // Resolve account_id for this source's account_name (case-insensitive)
   const accountName = candidates[0].account_name;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: account, error: accountError } = await (supabase as any)
     .from("accounts")
     .select("id")
     .eq("user_id", userId)
-    .eq("name", accountName)
+    .ilike("name", accountName)
     .single();
 
   if (accountError || !account) {

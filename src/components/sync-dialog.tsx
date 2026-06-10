@@ -217,15 +217,31 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
 
 function SourceResult({ result }: { result: SyncSourceResult }) {
   const label = SOURCES.find((s) => s.id === result.source)?.label ?? result.source;
+  const hasErrors = result.errors.length > 0;
   return (
     <div className="flex items-start gap-2 text-sm">
-      <CheckCircle2 className="mt-0.5 size-4 text-green-500" />
+      {hasErrors ? (
+        <AlertCircle className="mt-0.5 size-4 text-amber-500" />
+      ) : (
+        <CheckCircle2 className="mt-0.5 size-4 text-green-500" />
+      )}
       <div>
         <p className="font-medium">{label}</p>
         <p className="text-muted-foreground">
           {result.found} encontradas · {result.inserted} nuevas · {result.duplicates} duplicados
           {result.needs_review > 0 && ` · ${result.needs_review} para revisión`}
+          {hasErrors && ` · ${result.errors.length} errores`}
         </p>
+        {hasErrors && (
+          <ul className="mt-1 list-inside list-disc text-xs text-destructive">
+            {result.errors.slice(0, 5).map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+            {result.errors.length > 5 && (
+              <li>...y {result.errors.length - 5} más</li>
+            )}
+          </ul>
+        )}
       </div>
     </div>
   );

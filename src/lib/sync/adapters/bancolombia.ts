@@ -26,7 +26,7 @@ export function adaptBancolombia(
       merchant: tx.description || null,
       tx_date: tx.date.replace(/\//g, "-"),
       description_raw: tx.description,
-      account_name: "Bancolombia",
+      account_name: "Bancolombia Ahorros",
       source: "sync_bancolombia" as const,
     }));
 }
