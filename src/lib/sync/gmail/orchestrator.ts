@@ -229,18 +229,29 @@ export async function runGmailSource(
         // 3d. Process candidates through the engine
         const engineResult = await processCandidates(candidates, userId, month);
 
-        // 3e. Log processed email
-        const logStatus =
-          engineResult.inserted === 0 && engineResult.duplicates > 0
-            ? "duplicate"
-            : "registered";
+        // 3e. Log processed email — only if engine actually did something.
+        // If engine returned only errors (inserted=0, duplicates=0) it means
+        // a systemic failure (e.g. account not found) and we should NOT log,
+        // so the email remains available for re-processing on next run.
+        const engineDidWork =
+          engineResult.inserted > 0 || engineResult.duplicates > 0;
 
-        await logProcessedEmail({
-          messageId,
-          sourceId: sourceDef.id,
-          status: logStatus,
-          amountNative: candidates[0].amount_native,
-        });
+        if (engineDidWork) {
+          const logStatus =
+            engineResult.inserted === 0 && engineResult.duplicates > 0
+              ? "duplicate"
+              : "registered";
+
+          await logProcessedEmail({
+            messageId,
+            sourceId: sourceDef.id,
+            status: logStatus,
+            amountNative: candidates[0].amount_native,
+          });
+        } else if (engineResult.errors.length > 0) {
+          // Don't log — leave email unprocessed for retry.
+          // But DO count the errors in the result.
+        }
 
         // 3f. Merge engine result into running result
         result.inserted += engineResult.inserted;
@@ -255,23 +266,12 @@ export async function runGmailSource(
           throw err;
         }
 
-        // GmailApiError on a specific message: log, count as error, continue
+        // GmailApiError on a specific message: count as error, continue.
+        // Do NOT log to push_ingest_log so the email remains available for retry.
         const msg = err instanceof Error ? err.message : String(err);
         result.errors.push(
           `[${sourceDef.id}] Error processing message ${messageId}: ${msg}`
         );
-
-        // Try to log the failed email (best-effort)
-        try {
-          await logProcessedEmail({
-            messageId,
-            sourceId: sourceDef.id,
-            status: "no_parser",
-            errorMessage: `API/processing error: ${msg}`,
-          });
-        } catch {
-          // Silently ignore logging failures
-        }
       }
     }
   }
