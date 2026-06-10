@@ -3,6 +3,7 @@ import { computeDedupKey, isDuplicate, findCrossSourceDuplicate } from "./dedup"
 import { getParser } from "./parser-registry";
 import { resolveRate, calculateUsd } from "./fx";
 import { categorize } from "./categorizer";
+import { categorizeWithAi } from "./ai-categorizer";
 import { classifyTransaction } from "./classifier";
 import { computeSemaphore } from "./semaphore";
 import { checkAndAlert } from "./alert";
@@ -73,10 +74,23 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   }
   const amountUsd = calculateUsd(parsed.amount_native, fxResult.rate);
 
-  // 7. Categorize
+  // 7. Categorize (deterministic first, AI fallback)
   const catResult = await categorize(parsed.merchant, OWNER_USER_ID);
-  const categoryId = catResult.matched ? catResult.category_id : null;
-  const needsReview = !catResult.matched || classification.type === "unknown";
+  let categoryId: string | null = null;
+  let catMatched = false;
+
+  if (catResult.matched) {
+    categoryId = catResult.category_id;
+    catMatched = true;
+  } else if (parsed.merchant) {
+    const aiResult = await categorizeWithAi(parsed.merchant, parsed.description_raw, OWNER_USER_ID);
+    if (aiResult.matched) {
+      categoryId = aiResult.category_id;
+      catMatched = true;
+    }
+  }
+
+  const needsReview = !catMatched || classification.type === "unknown";
 
   // 8. Resolve account
   const { data: accounts } = await supabase

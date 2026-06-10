@@ -2,6 +2,7 @@ import type { CandidateTransaction, SyncSourceResult } from "./types";
 import { evaluateCandidate } from "./dedup-sync";
 import { resolveRate, calculateUsd } from "../push-ingest/fx";
 import { categorize } from "../push-ingest/categorizer";
+import { categorizeWithAi } from "../push-ingest/ai-categorizer";
 import { classifyTransaction } from "../push-ingest/classifier";
 import { getSupabaseAdmin } from "../push-ingest/supabase-admin";
 
@@ -95,17 +96,32 @@ export async function processCandidates(
 
       const isPayment = classification.type === "transfer";
 
-      // 4. Categorize
+      // 4. Categorize (deterministic first, AI fallback)
       const categorizationResult = await categorize(candidate.merchant, userId);
 
-      const categoryId = categorizationResult.matched
-        ? categorizationResult.category_id
-        : null;
+      let categoryId: string | null = null;
+      let categorizationMatched = false;
+
+      if (categorizationResult.matched) {
+        categoryId = categorizationResult.category_id;
+        categorizationMatched = true;
+      } else if (candidate.merchant) {
+        // AI fallback — also auto-creates a rule for next time
+        const aiResult = await categorizeWithAi(
+          candidate.merchant,
+          candidate.description_raw,
+          userId
+        );
+        if (aiResult.matched) {
+          categoryId = aiResult.category_id;
+          categorizationMatched = true;
+        }
+      }
 
       // Determine needs_review
       const needsReview =
         decision.action === "insert_review" ||
-        !categorizationResult.matched ||
+        !categorizationMatched ||
         classification.type === "unknown";
 
       // 5. Insert into transactions
@@ -127,7 +143,7 @@ export async function processCandidates(
           needs_review: needsReview,
           source: candidate.source,
           country: "CO",
-          expense_type: "variable",
+          expense_type: candidate.expense_type ?? "variable",
         });
 
       if (insertError) {
