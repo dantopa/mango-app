@@ -39,7 +39,7 @@ yarn-error.log*
 !.env.production
 
 # kiro
-.kiro/
+# .kiro/
 
 # vercel
 .vercel

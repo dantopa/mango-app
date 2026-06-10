@@ -1,0 +1,49 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "url": "https://mcp.supabase.com/mcp?project_ref=ixvxunclnbzguugiqelq",
+      "disabled": false,
+      "autoApprove": [
+        "execute_sql",
+        "list_edge_functions",
+        "get_edge_function",
+        "get_logs",
+        "deploy_edge_function",
+        "apply_migration"
+      ]
+    },
+    "google-workspace": {
+      "disabled": true
+    },
+    "google-workspace-qubika": {
+      "disabled": true
+    },
+    "granola": {
+      "disabled": true
+    },
+    "jira-disney": {
+      "disabled": true
+    },
+    "teams": {
+      "disabled": true
+    },
+    "outlook": {
+      "disabled": true
+    },
+    "slack-qubika": {
+      "disabled": true
+    },
+    "jenkins": {
+      "disabled": true
+    },
+    "confluence-disney": {
+      "disabled": true
+    },
+    "weaponx": {
+      "disabled": true
+    },
+    "engage-apis": {
+      "disabled": true
+    }
+  }
+}
