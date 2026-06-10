@@ -104,11 +104,25 @@ export function compareMerchants(
   if (normA.startsWith(normB) || normB.startsWith(normA)) return "match";
 
   // Token containment — all tokens of the shorter string are contained in the longer one
+  // Also allows prefix-matching of individual tokens (handles API truncation like "DATI" ≈ "DATING")
   const tokensA = normA.split(" ").filter((t) => t.length > 0);
   const tokensB = normB.split(" ").filter((t) => t.length > 0);
   const [shorter, longer] =
     tokensA.length <= tokensB.length ? [tokensA, tokensB] : [tokensB, tokensA];
-  if (shorter.length > 0 && shorter.every((t) => longer.includes(t))) return "match";
+
+  if (shorter.length > 0) {
+    // Strict containment: every token in shorter exists exactly in longer
+    if (shorter.every((t) => longer.includes(t))) return "match";
+
+    // Prefix token containment: every token in shorter is a prefix of (or matches) some token in longer
+    // (handles truncation: "DATI" matches "DATING", "PERGAMINO" matches "PERGAMINO")
+    const prefixMatch = shorter.every((shortToken) =>
+      longer.some((longToken) =>
+        longToken.startsWith(shortToken) || shortToken.startsWith(longToken)
+      )
+    );
+    if (prefixMatch) return "match";
+  }
 
   // Levenshtein distance
   const distance = levenshtein(normA, normB);

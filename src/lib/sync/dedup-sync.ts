@@ -127,6 +127,17 @@ export async function evaluateCandidate(
       let ambiguousCount = 0;
       let noMatchWithoutLast4 = 0;
 
+      // Special case: if candidate has no merchant, any amount+date match is
+      // strong evidence of duplicate (e.g., QR payments where email has no merchant
+      // but the API MCP source does). Discard immediately.
+      if (!candidate.merchant) {
+        const firstAvailable = availableTxs[0];
+        if (consumptionMap && firstAvailable) {
+          consumptionMap.set(firstAvailable.id, (consumptionMap.get(firstAvailable.id) ?? 0) + 1);
+        }
+        return { action: "discard", reason: "duplicate_amount_date_no_merchant" };
+      }
+
       for (const existing of availableTxs) {
         const comparison = compareMerchants(candidate.merchant, existing.merchant);
 
