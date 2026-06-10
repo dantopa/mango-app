@@ -160,7 +160,15 @@ export interface GmailSyncResponse {
 }
 ```
 
-`CandidateTransaction` no cambia. La única extensión al engine es la unión `SyncSource` (y `expense_type` fijo para arriendo, ver §6.3).
+`CandidateTransaction` gana dos campos opcionales (backward-compatible):
+
+```ts
+export interface CandidateTransaction {
+  // ... campos existentes sin cambios ...
+  expense_type?: "fixed" | "variable"; // default "variable"; arriendo usa "fixed" [implementado]
+  card_last4?: string | null;          // *5685 / *3679 / ••5685 — clave fuerte de dedup (§6, Wave 7)
+}
+```
 
 ## 5. OAuth y manejo de tokens
 
@@ -275,15 +283,48 @@ runGmailMonth(month, sources, cursor?, budgetMs≈20000):
 - Estados reutilizados del CHECK constraint existente: `registered` (insertado), `duplicate` (dedup lo descartó o re-run), `no_parser` (no transaccional / parse fallido, motivo en `error_message`), `transfer` (ingreso o transferencia pura), `registration_failed`.
 - El filtro previo (paso 2) hace el re-run barato: re-correr un mes ya cargado = 1 list + 1 query, 0 gets.
 
-### Dedup cross-fuente (capa existente)
+### Dedup cross-fuente: escalera determinista (Wave 7, pendiente)
 
-`evaluateCandidate` ya cubre los tres choques posibles:
+**El problema.** Las push notifications insertan en tiempo real; Gmail re-lee el mismo mes después. El mismo gasto llega por 2–3 canales (wallet push + push Bancolombia + email Bancolombia; o wallet push + email RappiCard) con merchant truncado distinto y fecha potencialmente corrida. La resolución es **determinista por escalera de claves de identidad** — sin LLM en el camino crítico (Req 10.4).
+
+**Agujeros verificados en `evaluateCandidate` / `fuzzy-matcher` actuales** (contra código y datos reales):
+
+1. **Día corrido por timezone**: `google-wallet.ts:71` deriva `tx_date` de `new Date()` del servidor (UTC en Vercel); el email trae fecha local Bogotá. Compra 20:00 Bogotá → push registra día siguiente → `eq(tx_date)` no matchea → **doble inserción silenciosa**. Afecta toda compra nocturna.
+2. **Fuzzy limitado a prefijo + Levenshtein ≤3**: "DLO Didi" vs "DIDI" → `no_match` → ruido de `insert_review`. (Sí cubre: "PERGAMINO VIVA ENVIG" vs "PERGAMINO VIVA ENVIGAD" por prefijo; "BOLD SA*COYO TAC" vs "BOLD SA COYO TAC" porque la normalización quita `*`.)
+3. **Compras repetidas legítimas**: datos reales del 31/05 — dos compras de $9.500 en PQUE ECOLOGICO el mismo día. El dedup actual descarta la segunda del email contra la primera del push → under-count silencioso.
+4. **Paso 2 demasiado agresivo**: el check contra `push_ingest_log` matchea monto-solo en todo el mes — un push de $7.500 el día 9 descarta un gasto distinto de $7.500 el día 20.
+
+**Escalera de matching (reemplaza el árbol del paso 1 de `evaluateCandidate`):**
+
+| Nivel | Clave | Veredicto |
+|---|---|---|
+| 1 | `card_last4` igual + monto igual + fecha ±1 día | `discard` (duplicado seguro, sin importar merchant) |
+| 2 | monto igual + fecha ±1 día + merchant `match` (fuzzy con token containment) | `discard` |
+| 3 | monto igual + fecha ±1 día + merchant `ambiguous` | `insert_review` |
+| 4 | monto igual + fecha ±1 día + merchant `no_match` y sin last4 común | `insert_review` (`same_amount_date_different_merchant`) |
+| 5 | sin coincidencia | `insert` |
+
+Soportes:
+
+- **`card_last4`**: ambos lados lo traen — email Bancolombia `*5685`, email RappiCard `Método de pago *3679`, wallet push `••5685` (ya persistido en `description_raw`: `"PERGAMINO... - COP7,500.00 con Debito Mastercard ••5685"`). Los parsers Gmail lo extraen a `candidate.card_last4`; del lado existente se extrae con regex `/[*•]{1,2}(\d{4})\b/` sobre `transactions.description_raw` al comparar (sin migración).
+- **Token containment** en `compareMerchants`: post-normalización, si todos los tokens del string más corto ⊂ tokens del más largo → `match`. Se agrega entre el check de prefijo y Levenshtein.
+- **Multiplicidad**: el dedup agrupa candidatas del batch por (monto, fecha, merchant normalizado) y descuenta existencias — `evaluateCandidate` recibe el contexto del run (cuántas candidatas equivalentes ya consumieron cada transacción existente).
+- **Paso 2 acotado**: ventana de `push_ingest_log` pasa de mes completo a `created_at` ±1 día respecto del `tx_date` de la candidata.
+- **Fix en origen**: `google-wallet.ts` calcula `tx_date` en `America/Bogota` (UTC−5 fijo, igual que `internalDateToLocal` de rappicard); la ventana ±1 día queda de cinturón.
+- **Auditabilidad**: todo `discard` conserva el motivo (`duplicate_card_match`, `duplicate_merchant_match`, …) en el log de idempotencia.
+
+Choques cubiertos:
 
 | Choque | Resultado |
 |---|---|
-| Email Bancolombia vs push notification ya registrada (mismo monto+fecha, merchant fuzzy-match: "PERGAMINO VIVA ENVIG" ≈ "PERGAMINO VIVA ENVIG") | `discard` |
-| Email RappiCard vs gasto manual del mismo monto+fecha, merchant distinto | `insert_review` (under-count: se inserta pero marcado) |
-| Email Arriendo (merchant "Arriendo") vs transferencia Bancolombia ("PALOMMA SAS") | el de arriendo entra primero; el de Bancolombia → `insert_review` + allowlist lo marca `is_payment` |
+| Email Bancolombia vs push Bancolombia (misma oración fuente) | nivel 2 — `discard` |
+| Email Bancolombia/RappiCard vs Google Wallet push (merchant truncado distinto, día corrido) | nivel 1 por last4; si no, nivel 2/3 |
+| Compra nocturna (fecha UTC vs Bogotá) | ventana ±1 día + fix en origen |
+| Dos compras idénticas reales el mismo día | multiplicidad — la segunda se inserta |
+| Email RappiCard vs gasto manual mismo monto+fecha | nivel 4 — `insert_review` (under-count: entra marcado) |
+| Email Arriendo ("Arriendo") vs transferencia Bancolombia ("PALOMMA SAS") | arriendo entra primero; Bancolombia → nivel 4 + allowlist `PALOMMA` lo marca `is_payment` |
+
+**¿Por qué no un LLM para decidir "es la misma compra"?** Un juez probabilístico en el camino crítico puede equivocarse en silencio: un falso "duplicado" = gasto perdido sin rastro (rompe under-count auditable), agrega latencia/costo dentro del presupuesto de ~25s y no es reproducible entre corridas. La escalera determinista + `needs_review` deja el residuo ambiguo visible para el humano. El `ai-categorizer` implementado no contradice esto: categorizar es bajo riesgo y converge a determinista. **v2 opcional** (Req 10.4): asistente LLM solo sobre lo ya insertado con `needs_review`, sugiriendo sin descartar autónomamente.
 
 ### `expense_type` para arriendo
 
@@ -360,6 +401,13 @@ Vitest (config existente). Fixtures: bodies reales sanitizados en `src/lib/sync/
 4. **Idempotencia del dedup_key**: ∀ messageId, `gmailDedupKey(id)` es determinístico, 32 hex chars, e inyectivo para ids distintos (colisión solo por hash).
 5. **Idempotencia end-to-end** (integration, con Supabase mockeado): procesar la misma lista de emails dos veces → segunda corrida `inserted === 0`.
 6. **Fuzzy dedup conmutativo**: ya cubierto por `fuzzy-matcher`; agregar caso "PALOMMA SAS" vs "Arriendo" → `no_match` (documenta el comportamiento esperado del choque arriendo).
+
+Propiedades de la Wave 7 (dedup hardening):
+
+7. **Token containment**: ∀ par (a, b) con tokens(norm(a)) ⊆ tokens(norm(b)) → `compareMerchants(a, b) === "match"`, y es conmutativo. Casos reales: ("DIDI", "DLO Didi"), ("MULTIPLEX", "MULTIPLEX VIVA ENVIG").
+8. **Ventana de fecha**: candidata con `tx_date` D y transacción existente con fecha D±1 + mismo monto + merchant match → `discard`; con fecha D±2 → `insert`. (Cubre el corrimiento UTC/Bogotá del wallet push.)
+9. **Multiplicidad conservadora**: con M existentes equivalentes y N candidatas equivalentes en el batch, el resultado neto es exactamente max(0, N−M) inserciones — ni una más (no duplica) ni una menos (no pierde la segunda compra real del mismo día).
+10. **last4 gana**: si `card_last4` coincide a ambos lados con monto igual y fecha en ventana, el veredicto es `discard` aun cuando `compareMerchants` diga `no_match`.
 
 ### Manual/E2E checklist (post-deploy)
 

@@ -123,9 +123,48 @@ Convenciones: código en inglés, UI en español. Antes de escribir route handle
   Sección en README: setup de Google Cloud, env vars, cómo agregar una fuente Gmail nueva (un archivo en `sources/` + entrada en registry), y la nota de alcance BBVA v2 (design §2).
   _Req: 10.1, 10.2_
 
+## Wave 7 — Dedup hardening (PENDIENTE — bloqueante antes de prender Google Wallet push en `full_pipeline`)
+
+Contexto y diseño: requirements 7.6–7.12 y design §6 "escalera determinista". Sin esto, el sync de Gmail duplica en silencio toda compra nocturna capturada por wallet push (timezone UTC vs Bogotá) y under-countea compras repetidas legítimas del mismo día.
+
+- [ ] **7.1 `card_last4` en candidatas y parsers**
+  `CandidateTransaction.card_last4?: string | null`; extracción en parsers Gmail (bancolombia `*NNNN`, rappicard `Método de pago *NNNN`) y en `google-wallet.ts` (`••NNNN`). Los adapters existentes (bancolombia API, nexo) lo dejan `undefined`.
+  _Req: 7.7_
+
+- [ ] **7.2 Token containment en `fuzzy-matcher.ts`**
+  En `compareMerchants`, entre el check de prefijo y Levenshtein: tokens(corto) ⊆ tokens(largo) → `match`. Tests con casos reales ("DIDI"/"DLO Didi", "MULTIPLEX"/"MULTIPLEX VIVA ENVIG") + propiedad de conmutatividad.
+  _Req: 7.8_
+
+- [ ] **7.3 Escalera en `dedup-sync.ts`**
+  Ventana `tx_date` ±1 día en la query a `transactions`; nivel 1 por `card_last4` (regex `/[*•]{1,2}(\d{4})\b/` sobre `description_raw` existente); acotar el paso 2 de `push_ingest_log` a `created_at` ±1 día (o eliminarlo); razón del veredicto en todo `DedupDecision`.
+  _Req: 7.6, 7.7, 7.10, 7.11_
+
+- [ ] **7.4 Multiplicidad**
+  Contexto de consumo por run: `processCandidates` pasa a `evaluateCandidate` cuántas candidatas equivalentes ya consumieron cada transacción existente. Test: batch con 2 candidatas idénticas + 1 existente → 1 discard + 1 insert.
+  _Req: 7.9_
+
+- [ ] **7.5 Fix timezone en `google-wallet.ts`**
+  `tx_date` en `America/Bogota` (UTC−5 fijo, reusar el patrón de `internalDateToLocal` de rappicard). Test: timestamp 01:30 UTC → fecha del día anterior local.
+  _Req: 7.12_
+
+- [ ] **7.6 Tests de regresión integrados**
+  (a) wallet push registrado 20:30 Bogotá + email Bancolombia del mismo gasto → 0 inserciones nuevas; (b) mismo monto+fecha con merchants divergentes pero last4 común → discard nivel 1; (c) propiedades 7–10 del design §11.
+  _Req: 7.6–7.12_
+
+## Wave 8 — Ajustes menores de la revisión v1 (no bloqueantes)
+
+- [ ] **8.1** `logProcessedEmail`: usar status `duplicate` cuando `engineResult.inserted === 0 && duplicates > 0` (hoy marca `registered` aunque el engine haya descartado) — mejora auditoría.
+- [ ] **8.2** Close item de Arriendo: no marcar `cargado` con `found === 0` (se espera exactamente 1 email/mes; para Bancolombia 0 es válido). Sugerencia: flag `requiresResults` en `GmailSourceDef`.
+- [ ] **8.3** `export const maxDuration` en rutas: `300` en `/api/sync/cron` (loop de cursor N×20s), `60` en `/api/sync/gmail` (budget 20s + AI hasta 8s extra).
+- [ ] **8.4** Prioridad de reglas AI: las auto-creadas por `ai-categorizer` usan `priority: 10` y superan a las manuales con default `0` — invertir (AI por debajo) para que una corrección humana siempre gane.
+- [ ] **8.5** Cap de AI en sync: timeout de `categorizeWithAi` a 4s y/o tope de llamadas por corrida, para no exceder el presupuesto medido por mensaje.
+
 ## Dependencias resumidas
 
 ```
-Wave 0 ──▶ Wave 1 ──▶ Wave 2 ──▶ Wave 3 ──▶ Wave 4 ──▶ Wave 6
-  (0.3 ─────────────▶ 2.x)         └──────▶ Wave 5 ──▶ Wave 6
+Wave 0 ──▶ Wave 1 ──▶ Wave 2 ──▶ Wave 3 ──▶ Wave 4 ──▶ Wave 6   [✓ completas]
+  (0.3 ─────────────▶ 2.x)         └──────▶ Wave 5 ──▶ Wave 6   [✓ completas]
+
+Wave 7 (dedup hardening) ──▶ prender wallet push full_pipeline
+Wave 8 (menores) — independiente, en cualquier momento
 ```

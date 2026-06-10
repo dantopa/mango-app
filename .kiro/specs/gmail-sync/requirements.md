@@ -150,6 +150,24 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 
 7.5. WHEN la cuenta (`account_name`) no existe en `accounts`, THEN el run de esa sub-fuente SHALL fallar con error reportado, sin afectar las demás sub-fuentes.
 
+### Dedup cross-fuente robusto (vs push Google Wallet / Bancolombia) — pendiente, Wave 7
+
+Contexto: las push notifications (Google Wallet, Bancolombia) insertan en tiempo real; el sync de Gmail corre después sobre el mismo mes. El mismo gasto puede llegar por 2–3 canales con merchant truncado distinto y fecha corrida por timezone. La resolución SHALL ser **determinista** (escalera de claves de identidad), no probabilística.
+
+7.6. WHEN se evalúa una candidata contra `transactions`, THEN la búsqueda SHALL usar una ventana de fecha de **±1 día** (no igualdad exacta): el wallet push deriva `tx_date` del reloj del servidor (UTC en Vercel) y el email trae fecha local Bogotá, por lo que compras nocturnas (~19:00–24:00 local) difieren en un día.
+
+7.7. Los parsers (Gmail y push) SHALL extraer `card_last4` cuando esté presente (email Bancolombia `*5685`, email RappiCard `*3679`, wallet push `••5685`). WHEN candidata y transacción existente coinciden en `card_last4` + monto + fecha ±1 día, THEN SHALL descartarse como duplicado seguro, sin importar el merchant.
+
+7.8. `compareMerchants` SHALL agregar **token containment** al árbol de comparación: si todos los tokens del merchant más corto están contenidos en el más largo (post-normalización), es `match` (ej.: "DIDI" ⊂ "DLO DIDI", "MULTIPLEX" ⊂ "MULTIPLEX VIVA ENVIG").
+
+7.9. El dedup SHALL ser consciente de **multiplicidad**: WHEN el batch contiene N candidatas idénticas en (monto, fecha, merchant-match) y existen M transacciones equivalentes en DB, THEN SHALL descartarse exactamente min(N, M) y procesarse las N−M restantes (caso real: dos compras de $9.500 en PQUE ECOLOGICO el mismo día — la segunda no debe perderse).
+
+7.10. El chequeo contra `push_ingest_log` por monto-solo a lo largo del mes (paso 2 actual de `evaluateCandidate`) SHALL acotarse a `created_at` ±1 día respecto del `tx_date` de la candidata, o eliminarse (las transacciones push ya viven en `transactions`); un gasto del día 20 no debe descartarse porque hubo un push del mismo monto el día 9.
+
+7.11. Toda decisión de descarte SHALL quedar registrada con su motivo (razón del `DedupDecision` → `error_message` del log de idempotencia), de modo que un duplicado mal resuelto sea auditable a posteriori.
+
+7.12. WHEN el wallet push parsea una notificación, THEN `tx_date` SHALL calcularse en zona `America/Bogota` (fix en origen de 7.6, en `google-wallet.ts`; la ventana ±1 día queda como cinturón de seguridad).
+
 ---
 
 ## Requirement 8 — Route Handler `/api/sync/gmail` + UI
@@ -193,3 +211,5 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 10.2. **Parseo de PDFs**: ninguna fuente v1 lo necesita. IF una fuente futura adjunta PDFs, THEN se SHALL evaluar `unpdf` (extracción de texto serverless-friendly) con presupuesto < 10s por PDF antes de considerar background processing.
 
 10.3. **Ingresos**: se detectan para descartar, no se registran (la tabla `transactions` modela gastos).
+
+10.4. **LLM como juez de duplicados**: descartado para el camino crítico — un veredicto probabilístico equivocado descarta gastos en silencio (rompe under-count auditable), agrega latencia dentro del límite de ~25s y no es reproducible entre corridas. El `ai-categorizer` ya implementado está bien ubicado: categorizar es bajo riesgo (un error es visible y corregible, no pierde plata) y converge a determinista vía reglas auto-creadas. IF tras un mes de uso el volumen de `insert_review` resulta alto, THEN se SHALL evaluar en v2 un asistente LLM que opere únicamente sobre transacciones ya insertadas con `needs_review = true`, sugiriendo resolución con razonamiento logueado, sin capacidad de descarte autónomo (puede reusar el cliente del ai-categorizer).
