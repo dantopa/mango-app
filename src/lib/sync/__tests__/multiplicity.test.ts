@@ -126,6 +126,103 @@ describe("Multiplicity — Req 7.9", () => {
     expect(decision2.action).toBe("insert");
   });
 
+  it("2 identical candidates + 1 existing FROM PUSH (push_ingest_log row present) → 1 discard + 1 insert", async () => {
+    // Realistic scenario: the existing transaction was captured by a push
+    // notification, so push_ingest_log has a `registered` row with the same
+    // amount and same-day created_at. The surplus occurrence must NOT be
+    // discarded by the step-2 push check after the transaction is consumed.
+    const existingTx = {
+      id: "tx-existing-1",
+      merchant: "PQUE ECOLOGICO",
+      amount_native: 9500,
+      tx_date: "2026-05-31",
+      description_raw: "PQUE ECOLOGICO EL SA - COP9,500.00 con Debito Mastercard ••5685",
+    };
+    const pushLogRow = {
+      dedup_key: "abc123push",
+      amount_native: 9500,
+    };
+
+    const mockSupabase = createMockSupabase({
+      transactions: [existingTx],
+      pushLogs: [pushLogRow],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(getSupabaseAdmin).mockReturnValue(mockSupabase as any);
+
+    const candidate: CandidateTransaction = {
+      amount_native: 9500,
+      native_currency: "COP",
+      merchant: "PQUE ECOLOGICO EL SA",
+      tx_date: "2026-05-31",
+      description_raw: "Compraste $9.500,00 en PQUE ECOLOGICO EL SA con tu T.Deb *5685",
+      account_name: "Bancolombia Débito",
+      source: "sync_gmail_bancolombia",
+    };
+
+    const consumptionMap: ConsumptionMap = new Map();
+
+    const decision1 = await evaluateCandidate(
+      candidate,
+      userId,
+      monthStart,
+      monthEnd,
+      consumptionMap
+    );
+    expect(decision1.action).toBe("discard");
+
+    const decision2 = await evaluateCandidate(
+      candidate,
+      userId,
+      monthStart,
+      monthEnd,
+      consumptionMap
+    );
+    expect(decision2.action).toBe("insert");
+  });
+
+  it("0 existing transactions + 1 push log row + 2 candidates → 1 discard + 1 insert", async () => {
+    // Edge: push captured the purchase but its transaction was deleted.
+    // The push row is consumable too — it can't discard two occurrences.
+    const mockSupabase = createMockSupabase({
+      transactions: [],
+      pushLogs: [{ dedup_key: "xyz789push", amount_native: 25000 }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(getSupabaseAdmin).mockReturnValue(mockSupabase as any);
+
+    const candidate: CandidateTransaction = {
+      amount_native: 25000,
+      native_currency: "COP",
+      merchant: null,
+      tx_date: "2026-05-15",
+      description_raw: "pagaste $25000.00 por codigo QR desde tu cuenta *9898 a la llave 0073300683",
+      account_name: "Bancolombia Débito",
+      source: "sync_gmail_bancolombia",
+    };
+
+    const consumptionMap: ConsumptionMap = new Map();
+
+    const decision1 = await evaluateCandidate(
+      candidate,
+      userId,
+      monthStart,
+      monthEnd,
+      consumptionMap
+    );
+    expect(decision1.action).toBe("discard");
+    expect(decision1.action === "discard" && decision1.reason).toBe("already_captured_by_push");
+
+    const decision2 = await evaluateCandidate(
+      candidate,
+      userId,
+      monthStart,
+      monthEnd,
+      consumptionMap
+    );
+    expect(decision2.action).toBe("insert");
+  });
+
   it("3 identical candidates + 2 existing → 2 discards + 1 insert", async () => {
     const existingTxs = [
       {

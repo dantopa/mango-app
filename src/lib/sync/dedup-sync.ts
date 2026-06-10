@@ -98,14 +98,17 @@ export async function evaluateCandidate(
         })
       : existingTxs;
 
-    // If all existing matches have been consumed, fall through to push_ingest_log check
+    // If all existing matches have been consumed by earlier candidates in this
+    // batch, this occurrence is a surplus real purchase (Req 7.9: exactly
+    // max(0, N−M) inserts). Do NOT fall through to push_ingest_log — those log
+    // rows correspond to the already-consumed transactions, and re-matching
+    // them would discard the surplus occurrence (defeating multiplicity).
     if (availableTxs.length === 0) {
-      // Skip to step 2 (push_ingest_log)
-    } else {
+      return { action: "insert" };
+    }
       // Extract candidate's card_last4 (from the field if present, otherwise from description_raw)
       const candidateLast4 =
-        (candidate as CandidateTransaction & { card_last4?: string | null }).card_last4 ??
-        extractCardLast4(candidate.description_raw);
+        candidate.card_last4 ?? extractCardLast4(candidate.description_raw);
 
       // --- Level 1: card_last4 match ---
       if (candidateLast4) {
@@ -172,13 +175,12 @@ export async function evaluateCandidate(
         };
       }
 
-      // Level 4: amount+date match, merchants differ, no common last4 → insert_review
-      if (noMatchWithoutLast4 > 0) {
-        return {
-          action: "insert_review",
-          reason: "same_amount_date_different_merchant",
-        };
-      }
+    // Level 4: amount+date match, merchants differ, no common last4 → insert_review
+    if (noMatchWithoutLast4 > 0) {
+      return {
+        action: "insert_review",
+        reason: "same_amount_date_different_merchant",
+      };
     }
   }
 
@@ -193,7 +195,22 @@ export async function evaluateCandidate(
     .lte("created_at", `${dateTo}T23:59:59`);
 
   if (!pushError && pushLogs && pushLogs.length > 0) {
-    return { action: "discard", reason: "already_captured_by_push" };
+    // Push log rows are also consumable (1:1), so a single push capture can't
+    // discard multiple surplus occurrences in the same batch (Req 7.9).
+    const availablePush = consumptionMap
+      ? pushLogs.filter(
+          (p: { dedup_key: string }) =>
+            (consumptionMap.get(`push:${p.dedup_key}`) ?? 0) < 1
+        )
+      : pushLogs;
+
+    if (availablePush.length > 0) {
+      if (consumptionMap) {
+        const key = `push:${availablePush[0].dedup_key}`;
+        consumptionMap.set(key, (consumptionMap.get(key) ?? 0) + 1);
+      }
+      return { action: "discard", reason: "already_captured_by_push" };
+    }
   }
 
   // Level 5: No match at all → insert

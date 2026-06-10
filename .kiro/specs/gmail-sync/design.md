@@ -172,10 +172,13 @@ runGmailMonth(month, sources, cursor?, budgetMs≈20000):
 | Nivel | Clave | Veredicto |
 |---|---|---|
 | 1 | `card_last4` igual + monto igual + fecha ±1 día | `discard` (duplicado seguro, sin importar merchant) |
+| 1.5 | candidata **sin merchant** (QR/llave) + monto igual + fecha ±1 día | `discard` (`duplicate_amount_date_no_merchant`) — desviación aceptada del spec original: el email QR no trae merchant y un match de monto+fecha es evidencia fuerte; under-count favorece descartar, y la multiplicidad protege las ocurrencias repetidas |
 | 2 | monto igual + fecha ±1 día + merchant `match` (fuzzy con token containment) | `discard` |
 | 3 | monto igual + fecha ±1 día + merchant `ambiguous` | `insert_review` |
 | 4 | monto igual + fecha ±1 día + merchant `no_match` y sin last4 común | `insert_review` (`same_amount_date_different_merchant`) |
 | 5 | sin coincidencia | `insert` |
+
+Invariante de multiplicidad (Req 7.9, fix de la revisión round 2): cada transacción existente **y cada fila de `push_ingest_log`** son consumibles 1:1 dentro del batch. Cuando todas las existentes del grupo ya fueron consumidas, la candidata excedente **inserta directamente sin pasar por el paso 2** — las filas del push log corresponden a las transacciones ya consumidas y re-matchearlas descartaba la ocurrencia excedente (neto N−M garantizado).
 
 Soportes:
 

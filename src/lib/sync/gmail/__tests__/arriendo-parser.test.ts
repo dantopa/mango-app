@@ -50,7 +50,7 @@ describe("Arriendo (Palomma) Gmail parser", () => {
       );
       expect(result[0].account_name).toBe("Bancolombia Ahorros");
       expect(result[0].source).toBe("sync_gmail_arriendo");
-      expect((result[0] as Record<string, unknown>).expense_type).toBe("fixed");
+      expect(result[0].expense_type).toBe("fixed");
     });
   });
 
