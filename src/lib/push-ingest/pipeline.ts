@@ -7,6 +7,7 @@ import { categorizeWithAi } from "./ai-categorizer";
 import { classifyTransaction } from "./classifier";
 import { computeSemaphore } from "./semaphore";
 import { checkAndAlert } from "./alert";
+import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
 import "./parsers"; // side-effect: registers all parsers
 
@@ -158,14 +159,12 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
     const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
 
-    // Sum variable expenses this month (exclude payments, fixed, needs_review)
+    // Sum all expenses this month (exclude payments only)
     const { data: monthTxns } = await supabase
       .from("transactions")
       .select("amount_usd")
       .eq("user_id", OWNER_USER_ID)
       .eq("is_payment", false)
-      .eq("expense_type", "variable")
-      .eq("needs_review", false)
       .gte("tx_date", monthStart)
       .lte("tx_date", monthEnd);
 
@@ -204,6 +203,29 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     }
   } catch (e) {
     console.error("[push-ingest][semaphore] error:", e);
+  }
+
+  // 12. Send web push notification
+  try {
+    const amountFormatted = parsed.native_currency === "USD"
+      ? `US$${parsed.amount_native.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+      : `${parsed.native_currency} ${parsed.amount_native.toLocaleString("es-CO")} (~US$${amountUsd.toFixed(2)})`;
+
+    const semaphoreEmoji = semaphoreResult
+      ? { verde: "🟢", amarillo: "🟡", rojo: "🔴" }[semaphoreResult.state]
+      : "";
+    const semaphoreText = semaphoreResult
+      ? ` ${semaphoreEmoji} ${Math.round(semaphoreResult.pct * 100)}% del presupuesto`
+      : "";
+
+    await sendPushNotification(OWNER_USER_ID, {
+      title: `💸 ${amountFormatted}`,
+      body: `${parsed.merchant ?? "Gasto"} registrado.${semaphoreText}`,
+      tag: `tx-${txData.id}`,
+      data: { url: "/gastos" },
+    });
+  } catch (e) {
+    console.error("[push-ingest][web-push] error:", e);
   }
 
   return { status: "registered", transaction_id: txData.id, semaphore: semaphoreResult };

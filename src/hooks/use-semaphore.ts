@@ -63,12 +63,11 @@ export function useSemaphore() {
       const { start, end } = getCurrentMonthRange();
       const { currentDay, daysInMonth } = getMonthInfo();
 
-      // Query accumulated variable expenses for current month
+      // Query accumulated expenses for current month (all types, not just variable)
       const { data, error } = await supabase
         .from("transactions")
         .select("amount_usd")
         .eq("is_payment", false)
-        .eq("expense_type", "variable")
         .gte("tx_date", start)
         .lte("tx_date", end);
 

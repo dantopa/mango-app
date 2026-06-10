@@ -15,6 +15,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { PushNotificationToggle } from "@/components/push-notification-toggle";
 
 const NAV = [
   { href: "/", label: "Dashboard", short: "Inicio", icon: LayoutDashboard },
@@ -72,8 +73,11 @@ export function AppShell({
           })}
         </nav>
         <div className="border-t border-border p-3">
-          <div className="truncate px-3 pb-2 text-xs text-muted-foreground" title={email}>
-            {email}
+          <div className="flex items-center justify-between px-3 pb-2">
+            <span className="truncate text-xs text-muted-foreground" title={email}>
+              {email}
+            </span>
+            <PushNotificationToggle />
           </div>
           <form action="/auth/signout" method="post">
             <Button
@@ -94,11 +98,14 @@ export function AppShell({
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         {brand}
-        <form action="/auth/signout" method="post">
-          <Button variant="ghost" size="icon" aria-label="Cerrar sesión" className="text-muted-foreground">
-            <LogOut className="size-5" />
-          </Button>
-        </form>
+        <div className="flex items-center gap-1">
+          <PushNotificationToggle />
+          <form action="/auth/signout" method="post">
+            <Button variant="ghost" size="icon" aria-label="Cerrar sesión" className="text-muted-foreground">
+              <LogOut className="size-5" />
+            </Button>
+          </form>
+        </div>
       </header>
 
       {/* Mobile bottom tab bar */}
