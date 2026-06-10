@@ -130,10 +130,14 @@ export async function processCandidates(
       }
 
       // Determine needs_review
+      // needs_review should be true only when:
+      // - Dedup said insert_review (ambiguous duplicate)
+      // - Categorization failed entirely (no category assigned)
+      // Classification "unknown" alone shouldn't trigger review if we have a category,
+      // because most expenses simply don't have classification rules (they're not transfers).
       const needsReview =
         decision.action === "insert_review" ||
-        !categorizationMatched ||
-        classification.type === "unknown";
+        !categorizationMatched;
 
       // 5. Insert into transactions
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

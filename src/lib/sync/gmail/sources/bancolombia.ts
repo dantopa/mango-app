@@ -5,12 +5,12 @@ import { parseCopAmount, normalizeDate } from "../money";
 // --- Classification regexes (ordered most-specific first) ---
 
 const RE_INGRESO = /(recibiste una transferencia|recibiste un pago)/i;
-const RE_COMPRA = /compraste \$[\d.,]+ en/i;
-const RE_PAGO_SERVICIO = /pagaste \$[\d.,]+ a .+ desde tu producto/i;
-const RE_QR = /pagaste .* por codigo QR/i;
-const RE_BREB_LLAVE = /transferiste \$[\d.,]+ a la llave/i;
-const RE_BOTON = /transferiste \$[\d.,]+ por Boton Bancolombia/i;
-const RE_TRANSFERENCIA = /transferiste \$[\d.,]+ desde tu cuenta/i;
+const RE_COMPRA = /compraste\s+\$[\d.,]+\s+en/i;
+const RE_PAGO_SERVICIO = /pagaste\s+\$[\d.,]+\s+a[\s\S]+?desde\s+tu\s+producto/i;
+const RE_QR = /pagaste[\s\S]*?por\s+codigo\s+QR/i;
+const RE_BREB_LLAVE = /transferiste\s+\$[\d.,]+\s+a\s+la\s+llave/i;
+const RE_BOTON = /transferiste\s+\$[\d.,]+\s+por\s+Boton\s+Bancolombia/i;
+const RE_TRANSFERENCIA = /transferiste\s+\$[\d.,]+\s+desde\s+tu\s+cuenta/i;
 
 // --- Extraction regexes ---
 
@@ -70,12 +70,12 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
 
   if (RE_COMPRA.test(text)) {
     // "Compraste $X en MERCHANT con tu T.Deb/T.Cred *NNNN, el DD/MM/YYYY"
-    const m = text.match(/compraste \$[\d.,]+ en (.+?) con tu/i);
-    merchant = m ? m[1].trim() : null;
+    const m = text.match(/compraste\s+\$[\d.,]+\s+en\s+([\s\S]+?)\s+con\s+tu/i);
+    merchant = m ? m[1].replace(/\s+/g, " ").trim() : null;
   } else if (RE_PAGO_SERVICIO.test(text)) {
     // "Pagaste $X a BENEFICIARIO desde tu producto NNNN el DD/MM/YYYY"
-    const m = text.match(/pagaste \$[\d.,]+ a (.+?) desde tu producto/i);
-    merchant = m ? m[1].trim() : null;
+    const m = text.match(/pagaste\s+\$[\d.,]+\s+a\s+([\s\S]+?)\s+desde\s+tu\s+producto/i);
+    merchant = m ? m[1].replace(/\s+/g, " ").trim() : null;
   } else if (RE_QR.test(text)) {
     // "pagaste $X por codigo QR desde tu cuenta *NNNN a la llave NNNN el DD/MM/YYYY"
     // Llave numérica → no merchant name
@@ -83,18 +83,18 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
   } else if (RE_BOTON.test(text)) {
     // "Transferiste $X por Boton Bancolombia a DESTINATARIO desde producto *NNNN. DD/MM/YYYY"
     const m = text.match(
-      /transferiste \$[\d.,]+ por Boton Bancolombia a (.+?) desde producto/i
+      /transferiste\s+\$[\d.,]+\s+por\s+Boton\s+Bancolombia\s+a\s+([\s\S]+?)\s+desde\s+producto/i
     );
-    merchant = m ? m[1].trim() : null;
+    merchant = m ? m[1].replace(/\s+/g, " ").trim() : null;
   } else if (RE_BREB_LLAVE.test(text)) {
     // "transferiste $X a la llave @user desde tu cuenta *NNNN a NOMBRE el DD/MM/YY"
     const m = text.match(
-      /transferiste \$[\d.,]+ a la llave \S+ desde tu cuenta \*\d+ a (.+?) el/i
+      /transferiste\s+\$[\d.,]+\s+a\s+la\s+llave\s+\S+\s+desde\s+tu\s+cuenta\s+\*\d+\s+a\s+([\s\S]+?)\s+el/i
     );
-    merchant = m ? m[1].trim() : null;
+    merchant = m ? m[1].replace(/\s+/g, " ").trim() : null;
   } else if (RE_TRANSFERENCIA.test(text)) {
     // "Transferiste $X desde tu cuenta *NNNN a la cuenta *NNNN el DD/MM/YYYY"
-    const m = text.match(/a la cuenta \*(\d+)/i);
+    const m = text.match(/a\s+la\s+cuenta\s+\*(\d+)/i);
     merchant = m ? `Cuenta *${m[1]}` : null;
   } else {
     // No recognized pattern → not a transaction we can parse
@@ -105,13 +105,21 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
   const cardMatch = text.match(RE_CARD_LAST4);
   const card_last4 = cardMatch ? cardMatch[1] : null;
 
+  // Build a clean description_raw: just the transactional sentence
+  const sentenceMatch = text.match(
+    /(?:Bancolombia:\s*)?(?:Compraste|[Pp]agaste|[Tt]ransferiste|recibiste)\s+\$[\d.,]+[\s\S]*?(?:\d{2}\/\d{2}\/\d{2,4})(?:\s+a\s+las\s+\d{2}:\d{2}(?::\d{2})?)?\.?/
+  );
+  const descriptionRaw = sentenceMatch
+    ? sentenceMatch[0].replace(/\s+/g, " ").trim()
+    : text.slice(0, 200);
+
   return [
     {
       amount_native: amount,
       native_currency: "COP",
       merchant,
       tx_date: txDate,
-      description_raw: text.trim(),
+      description_raw: descriptionRaw,
       account_name: "Bancolombia Débito",
       source: "sync_gmail_bancolombia",
       card_last4,
