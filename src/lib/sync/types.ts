@@ -18,7 +18,8 @@ export type SyncSource =
   | "sync_nexo"
   | "sync_gmail_bancolombia"
   | "sync_gmail_rappicard"
-  | "sync_gmail_arriendo";
+  | "sync_gmail_arriendo"
+  | "sync_notifications";
 
 /** Resultado de dedup para una candidata individual */
 export type DedupDecision =
@@ -63,7 +64,7 @@ export interface SyncErrorResponse {
 }
 
 /** Fuentes visibles desde el cliente (incluye "sync_gmail" como grupo) */
-export type ClientSyncSource = SyncSource | "sync_gmail";
+export type ClientSyncSource = SyncSource | "sync_gmail" | "sync_notifications";
 
 /** Parámetros del sync desde el cliente */
 export interface SyncParams {

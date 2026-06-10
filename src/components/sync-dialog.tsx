@@ -32,6 +32,7 @@ const SOURCES: { id: ClientSyncSource; label: string }[] = [
   { id: "sync_bancolombia", label: "Bancolombia" },
   { id: "sync_nexo", label: "Nexo Card" },
   { id: "sync_gmail", label: "Gmail" },
+  { id: "sync_notifications", label: "Notificaciones (NFC/push)" },
 ];
 
 const GMAIL_SUB_SOURCE_LABELS: Record<string, string> = {

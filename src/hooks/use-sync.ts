@@ -13,12 +13,13 @@ import type {
 import type { GmailSyncCursor, GmailSyncResponse } from "@/lib/sync/gmail/types";
 import { queryKeys } from "@/hooks/use-finance";
 
-const SOURCE_ENDPOINTS: Record<SyncSource, string> = {
+const SOURCE_ENDPOINTS: Record<SyncSource | "sync_notifications", string> = {
   sync_bancolombia: "/api/sync/bancolombia",
   sync_nexo: "/api/sync/nexo",
   sync_gmail_bancolombia: "/api/sync/gmail",
   sync_gmail_rappicard: "/api/sync/gmail",
   sync_gmail_arriendo: "/api/sync/gmail",
+  sync_notifications: "/api/sync/notifications",
 };
 
 const GMAIL_ENDPOINT = "/api/sync/gmail";
@@ -61,6 +62,9 @@ export function useSync() {
         if (source === "sync_gmail") {
           // Gmail: cursor-based loop
           await syncGmail(params.month, completed, errors, setProgress);
+        } else if (source === "sync_notifications") {
+          // Notifications: single POST like legacy
+          await syncLegacySource("sync_notifications" as SyncSource, params.month, completed, errors, setProgress);
         } else {
           // Legacy sources: single POST
           await syncLegacySource(source, params.month, completed, errors, setProgress);
