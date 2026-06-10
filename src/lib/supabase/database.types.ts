@@ -254,6 +254,30 @@ export type Database = {
           },
         ]
       }
+      user_settings: {
+        Row: {
+          id: string
+          user_id: string
+          budget_ceiling_usd: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          budget_ceiling_usd?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          budget_ceiling_usd?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       transactions: {
         Row: {
           account_id: string
