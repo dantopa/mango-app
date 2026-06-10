@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+export const maxDuration = 300;
+
 import { callMcpTool, McpError } from "@/lib/sync/mcp-client";
 import { adaptBancolombia } from "@/lib/sync/adapters/bancolombia";
 import { adaptNexo, type NexoRawTx } from "@/lib/sync/adapters/nexo";

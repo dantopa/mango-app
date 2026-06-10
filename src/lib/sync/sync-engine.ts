@@ -1,10 +1,13 @@
 import type { CandidateTransaction, SyncSourceResult } from "./types";
-import { evaluateCandidate } from "./dedup-sync";
+import { evaluateCandidate, type ConsumptionMap } from "./dedup-sync";
 import { resolveRate, calculateUsd } from "../push-ingest/fx";
 import { categorize } from "../push-ingest/categorizer";
 import { categorizeWithAi } from "../push-ingest/ai-categorizer";
 import { classifyTransaction } from "../push-ingest/classifier";
 import { getSupabaseAdmin } from "../push-ingest/supabase-admin";
+
+/** Max AI categorization calls per processCandidates batch to control cost/time */
+const MAX_AI_CALLS_PER_BATCH = 5;
 
 /**
  * Procesa un batch de candidatas: dedup → FX → classify → categorize → insert.
@@ -26,6 +29,8 @@ export async function processCandidates(
   };
 
   if (candidates.length === 0) return result;
+
+  let aiCallCount = 0;
 
   const monthStart = `${month}-01`;
   const monthEnd = getMonthEnd(month);
@@ -51,6 +56,10 @@ export async function processCandidates(
 
   const accountId = account.id;
 
+  // Multiplicity tracking: tracks how many times each existing transaction
+  // has been consumed (matched as duplicate) by candidates in this batch.
+  const consumptionMap: ConsumptionMap = new Map();
+
   for (const candidate of candidates) {
     try {
       // 1. Dedup
@@ -58,7 +67,8 @@ export async function processCandidates(
         candidate,
         userId,
         monthStart,
-        monthEnd
+        monthEnd,
+        consumptionMap
       );
 
       if (decision.action === "discard") {
@@ -105,8 +115,9 @@ export async function processCandidates(
       if (categorizationResult.matched) {
         categoryId = categorizationResult.category_id;
         categorizationMatched = true;
-      } else if (candidate.merchant) {
+      } else if (candidate.merchant && aiCallCount < MAX_AI_CALLS_PER_BATCH) {
         // AI fallback — also auto-creates a rule for next time
+        aiCallCount++;
         const aiResult = await categorizeWithAi(
           candidate.merchant,
           candidate.description_raw,

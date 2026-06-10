@@ -86,6 +86,7 @@ export const arriendoDef: GmailSourceDef = {
   syncSource: "sync_gmail_arriendo",
   accountName: "Bancolombia",
   closeItemSource: "Arriendo",
+  requiresResults: true,
   buildQuery,
   parse,
 };

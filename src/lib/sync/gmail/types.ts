@@ -8,6 +8,8 @@ export interface GmailSourceDef {
   syncSource: SyncSource;
   accountName: string;
   closeItemSource: string | null;
+  /** When true, finding 0 emails means something is wrong — don't mark close item. */
+  requiresResults?: boolean;
   buildQuery(month: string): string;
   parse(email: ParsedEmail): CandidateTransaction[];
 }

@@ -9,6 +9,7 @@ import { parseCopAmount, normalizeDate } from "../money";
 const RE_MONTO = /Monto\s+\$([\d.,]+)/;
 const RE_COMERCIO = /Comercio\s+([\s\S]+?)(?:\s{2,}|\n|Fecha)/;
 const RE_FECHA = /Fecha de la transacci[óo]n\s+(\d{2}\/\d{2}\/\d{4})/;
+const RE_METODO_PAGO = /[Mm][ée]todo de pago\s+\*(\d{4})/;
 
 /**
  * Build the Gmail search query for RappiCard transaction emails in a given month.
@@ -73,6 +74,10 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
     txDate = internalDateToLocal(email.internalDate);
   }
 
+  // Extract card last 4 digits (pattern: Método de pago *NNNN)
+  const cardMatch = text.match(RE_METODO_PAGO);
+  const card_last4 = cardMatch ? cardMatch[1] : null;
+
   return [
     {
       amount_native: amount,
@@ -82,6 +87,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
       description_raw: text.trim().slice(0, 200),
       account_name: "RappiCard",
       source: "sync_gmail_rappicard",
+      card_last4,
     },
   ];
 }

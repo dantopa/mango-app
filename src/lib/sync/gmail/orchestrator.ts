@@ -170,7 +170,8 @@ export async function runGmailSource(
   result.found = allMessageIds.length;
 
   if (allMessageIds.length === 0) {
-    if (sourceDef.closeItemSource) {
+    // Only mark close item if source doesn't require results (0 found is valid)
+    if (sourceDef.closeItemSource && !sourceDef.requiresResults) {
       await markCloseItem(sourceDef.closeItemSource, month);
     }
     return { result, exhausted: false };
@@ -229,10 +230,15 @@ export async function runGmailSource(
         const engineResult = await processCandidates(candidates, userId, month);
 
         // 3e. Log processed email
+        const logStatus =
+          engineResult.inserted === 0 && engineResult.duplicates > 0
+            ? "duplicate"
+            : "registered";
+
         await logProcessedEmail({
           messageId,
           sourceId: sourceDef.id,
-          status: "registered",
+          status: logStatus,
           amountNative: candidates[0].amount_native,
         });
 

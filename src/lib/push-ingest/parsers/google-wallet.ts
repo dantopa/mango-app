@@ -35,6 +35,19 @@ function derivePaymentType(text: string): string {
 }
 
 /**
+ * Convert epoch ms to YYYY-MM-DD in America/Bogota (UTC-5, no DST).
+ * Same pattern as `internalDateToLocal` in the RappiCard Gmail parser.
+ */
+export function timestampToLocalDate(epochMs: number): string {
+  const offsetMs = 5 * 60 * 60 * 1000;
+  const local = new Date(epochMs - offsetMs);
+  const y = local.getUTCFullYear();
+  const m = String(local.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(local.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
  * Map card digits to account name.
  * TODO: make this configurable via Card_Account_Map
  */
@@ -64,11 +77,13 @@ export const googleWalletParser: ParserFn = (payload: PushPayload): ParsedTransa
   // Account name from card type in text
   const accountName = resolveAccountName(cardDigits, text);
 
-  // Date: use postedAt from payload (real-time notification = today)
+  // Date: use postedAt from payload, converted to America/Bogota (UTC-5, no DST).
+  // On Vercel the server clock is UTC, so a notification at 20:30 Bogotá (01:30 UTC next day)
+  // would register the wrong date if we used getFullYear/getMonth/getDate directly.
   const postedAt = typeof payload.timestamp === "number"
     ? new Date(payload.timestamp)
     : new Date();
-  const txDate = `${postedAt.getFullYear()}-${String(postedAt.getMonth() + 1).padStart(2, "0")}-${String(postedAt.getDate()).padStart(2, "0")}`;
+  const txDate = timestampToLocalDate(postedAt.getTime());
 
   return {
     amount_native: amount,
@@ -77,5 +92,6 @@ export const googleWalletParser: ParserFn = (payload: PushPayload): ParsedTransa
     tx_date: txDate,
     description_raw: `${title} - ${text}`,
     account_name: accountName,
+    card_last4: cardDigits,
   };
 };

@@ -74,7 +74,7 @@ Descripción: "${descriptionRaw}"`;
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), 4000);
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -130,7 +130,7 @@ Descripción: "${descriptionRaw}"`;
           pattern,
           match_type: "ilike",
           category_id: matchedCategory.id,
-          priority: 10, // AI-generated rules at base priority
+          priority: -10, // AI-generated: below manual rules (default 0) so human corrections always win
         });
 
       if (!ruleError) {

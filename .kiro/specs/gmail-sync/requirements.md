@@ -1,6 +1,6 @@
-# Gmail Expense Sync — Requirements
+# Requirements Document
 
-## Contexto
+## Introduction
 
 Maquinita ya tiene un sync engine batch (`src/lib/sync/`) con `processCandidates(candidates, userId, month)` que hace dedup (fuzzy merchant matching contra `transactions` y `push_ingest_log`) → FX → clasificación de transferencias → categorización → insert. Las fuentes actuales son APIs bancarias vía `browser-token-mcp` (Bancolombia, Nexo). Este spec agrega **Gmail como fuente de datos**: parsear emails transaccionales reales y emitir `CandidateTransaction[]` hacia ese mismo engine.
 
@@ -22,13 +22,22 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 - **Sin tablas nuevas**: idempotencia por email se registra en `push_ingest_log` (PK `dedup_key`), transacciones van a `transactions`.
 - **Extensibilidad**: agregar una fuente nueva = un archivo nuevo en `src/lib/sync/gmail/sources/` que exporta query + parser.
 
----
+## Glossary
 
-## Requirement 1 — Conexión OAuth con Gmail
+- **CandidateTransaction**: Objeto intermedio que representa un gasto potencial extraído de una fuente, antes de pasar por dedup/FX/insert.
+- **Under-count**: Principio de diseño — ante la duda, no insertar (o marcar `needs_review`). Nunca inventar datos.
+- **Dedup**: Deduplicación — evitar insertar el mismo gasto dos veces cuando llega por múltiples canales.
+- **FX**: Foreign exchange — conversión a USD congelada al momento de carga.
+- **Vault**: Extensión de Supabase para almacenar secretos cifrados at-rest.
+- **push_ingest_log**: Tabla existente usada como registro de idempotencia (PK `dedup_key`).
 
-**User story:** Como dueño de Maquinita, quiero conectar mi Gmail una sola vez, para que el sistema lea mis emails transaccionales sin que yo vuelva a autenticarme.
+## Requirements
 
-### Acceptance criteria
+### Requirement 1: Conexión OAuth con Gmail
+
+**User Story:** Como dueño de Maquinita, quiero conectar mi Gmail una sola vez, para que el sistema lea mis emails transaccionales sin que yo vuelva a autenticarme.
+
+#### Acceptance Criteria
 
 1.1. WHEN el usuario visita `/api/gmail/auth` autenticado en la app, THEN el sistema SHALL redirigir al consent screen de Google solicitando únicamente el scope `https://www.googleapis.com/auth/gmail.readonly`, con `access_type=offline` y `prompt=consent`.
 
@@ -42,13 +51,11 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 
 1.6. El refresh token SHALL ser accesible únicamente con service role key (RPCs `SECURITY DEFINER` revocadas para `anon` y `authenticated`).
 
----
+### Requirement 2: Búsqueda de emails por mes y fuente
 
-## Requirement 2 — Búsqueda de emails por mes y fuente
+**User Story:** Como usuario, quiero que el sync de un mes encuentre exactamente los emails transaccionales de ese mes, para no procesar promociones ni meses ajenos.
 
-**User story:** Como usuario, quiero que el sync de un mes encuentre exactamente los emails transaccionales de ese mes, para no procesar promociones ni meses ajenos.
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 2.1. WHEN se sincroniza el mes `YYYY-MM` para una fuente, THEN el sistema SHALL construir una Gmail search query con `from:`, (`subject:` si aplica), `after:YYYY/MM/01` y `before:` primer día del mes siguiente.
 
@@ -58,13 +65,11 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 
 2.4. WHEN un email matchea la query pero no es transaccional (promos, avisos de factura disponible, alertas de seguridad), THEN el parser SHALL devolver vacío y el email SHALL registrarse como descartado sin insertar nada (under-count).
 
----
+### Requirement 3: Parser Bancolombia (notificaciones en body)
 
-## Requirement 3 — Parser Bancolombia (notificaciones en body)
+**User Story:** Como usuario, quiero que cada alerta de movimiento de Bancolombia se convierta en una transacción con monto, comercio y fecha correctos.
 
-**User story:** Como usuario, quiero que cada alerta de movimiento de Bancolombia se convierta en una transacción con monto, comercio y fecha correctos.
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 3.1. WHEN el body contiene el patrón `Compraste $X en MERCHANT con tu T.Deb/T.Cred *NNNN, el DD/MM/YYYY`, THEN el parser SHALL emitir un candidato con `amount_native`, `merchant`, `tx_date` extraídos y `native_currency: "COP"`.
 
@@ -82,13 +87,11 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 
 3.8. Los candidatos SHALL llevar `source: "sync_gmail_bancolombia"`, `account_name: "Bancolombia"` y `description_raw` = oración transaccional original.
 
----
+### Requirement 4: Parser RappiCard (notificaciones por transacción)
 
-## Requirement 4 — Parser RappiCard (notificaciones por transacción)
+**User Story:** Como usuario, quiero que cada compra con RappiCard llegue a Maquinita desde el email "Resumen de transacción".
 
-**User story:** Como usuario, quiero que cada compra con RappiCard llegue a Maquinita desde el email "Resumen de transacción".
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 4.1. WHEN un email de `noreply@rappicard.co` contiene los campos Monto, Comercio y Fecha de la transacción, THEN el parser SHALL emitir un candidato con `amount_native` (formato CO `$88.443`), `merchant` = valor de Comercio, `tx_date` normalizada a `YYYY-MM-DD`, `native_currency: "COP"`, `source: "sync_gmail_rappicard"`, `account_name: "RappiCard"`.
 
@@ -98,13 +101,11 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 
 4.4. IF en el futuro el monto aparece con decimales (`$88.443,50`), THEN el parser SHALL interpretarlo con la misma lógica de montos CO del Req 3.6.
 
----
+### Requirement 5: Parser Arriendo (Palomma)
 
-## Requirement 5 — Parser Arriendo (Palomma)
+**User Story:** Como usuario, quiero que el pago mensual del arriendo se registre automáticamente como gasto fijo al llegar la confirmación de Palomma.
 
-**User story:** Como usuario, quiero que el pago mensual del arriendo se registre automáticamente como gasto fijo al llegar la confirmación de Palomma.
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 5.1. WHEN un email de `info@palomma.com` con subject "Confirmación de Pago" contiene Estado "Aprobado", THEN el parser SHALL emitir exactamente un candidato con `amount_native` = "Valor total" (formato `$ 1.900.000`), `tx_date` = campo Fecha (`DD/MM/YYYY`), `merchant: "Arriendo"`, `description_raw` = descripción del pago + N. de referencia, `source: "sync_gmail_arriendo"`, `account_name: "Bancolombia"`.
 
@@ -114,13 +115,11 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 
 5.4. WHEN el mismo pago llega también como email Bancolombia ("Transferiste … a PALOMMA SAS"), THEN el sistema SHALL evitar el doble conteo: la fuente Arriendo se procesa **antes** que Bancolombia dentro del mismo run, y la variante Bancolombia con mismo monto+fecha SHALL resultar `discard` o `insert_review` según el árbol de dedup existente. Adicionalmente se SHALL seedear una regla `transfer_classification_rules` (allowlist, pattern `PALOMMA`) para que la transferencia Bancolombia se marque `is_payment` y no compute como gasto.
 
----
+### Requirement 6: Idempotencia por email procesado
 
-## Requirement 6 — Idempotencia por email procesado
+**User Story:** Como usuario, quiero re-correr el sync del mismo mes cuantas veces quiera sin generar duplicados.
 
-**User story:** Como usuario, quiero re-correr el sync del mismo mes cuantas veces quiera sin generar duplicados.
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 6.1. WHEN se procesa un email, THEN el sistema SHALL registrar una fila en `push_ingest_log` con `dedup_key = sha256("gmail|" + gmail_message_id)` (truncado a 32 hex, igual que el pipeline push) y `package_name = "gmail." + sourceId`.
 
@@ -132,13 +131,11 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 
 6.5. No se SHALL usar labels de Gmail como mecanismo de tracking (mantiene el scope en `gmail.readonly`).
 
----
+### Requirement 7: Integración con el sync engine y dedup cross-fuente
 
-## Requirement 7 — Integración con el sync engine y dedup cross-fuente
+**User Story:** Como usuario, quiero que los gastos de Gmail pasen por el mismo pipeline (dedup, FX, clasificación, categorización) que el resto de las fuentes.
 
-**User story:** Como usuario, quiero que los gastos de Gmail pasen por el mismo pipeline (dedup, FX, clasificación, categorización) que el resto de las fuentes.
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 7.1. Cada sub-fuente Gmail SHALL emitir `CandidateTransaction[]` y llamar al `processCandidates()` existente sin reimplementar dedup/FX/insert.
 
@@ -149,10 +146,6 @@ Estos hallazgos **acotan el alcance** y corrigen supuestos del pedido original:
 7.4. WHEN `processCandidates` se invoca, THEN SHALL recibir candidatas de **una sola cuenta** por llamada (limitación existente: resuelve `account_id` desde `candidates[0]`); el orquestador Gmail SHALL agrupar por sub-fuente.
 
 7.5. WHEN la cuenta (`account_name`) no existe en `accounts`, THEN el run de esa sub-fuente SHALL fallar con error reportado, sin afectar las demás sub-fuentes.
-
-### Dedup cross-fuente robusto (vs push Google Wallet / Bancolombia) — pendiente, Wave 7
-
-Contexto: las push notifications (Google Wallet, Bancolombia) insertan en tiempo real; el sync de Gmail corre después sobre el mismo mes. El mismo gasto puede llegar por 2–3 canales con merchant truncado distinto y fecha corrida por timezone. La resolución SHALL ser **determinista** (escalera de claves de identidad), no probabilística.
 
 7.6. WHEN se evalúa una candidata contra `transactions`, THEN la búsqueda SHALL usar una ventana de fecha de **±1 día** (no igualdad exacta): el wallet push deriva `tx_date` del reloj del servidor (UTC en Vercel) y el email trae fecha local Bogotá, por lo que compras nocturnas (~19:00–24:00 local) difieren en un día.
 
@@ -168,13 +161,11 @@ Contexto: las push notifications (Google Wallet, Bancolombia) insertan en tiempo
 
 7.12. WHEN el wallet push parsea una notificación, THEN `tx_date` SHALL calcularse en zona `America/Bogota` (fix en origen de 7.6, en `google-wallet.ts`; la ventana ±1 día queda como cinturón de seguridad).
 
----
+### Requirement 8: Route Handler y UI
 
-## Requirement 8 — Route Handler `/api/sync/gmail` + UI
+**User Story:** Como usuario, quiero disparar el sync de Gmail desde el SyncDialog y ver progreso por sub-fuente.
 
-**User story:** Como usuario, quiero disparar el sync de Gmail desde el SyncDialog y ver progreso por sub-fuente.
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 8.1. `POST /api/sync/gmail` SHALL aceptar `{ month: "YYYY-MM", sources?: GmailSourceId[] }` (default: todas las sub-fuentes), autenticado con sesión Supabase, y devolver `{ results: SyncSourceResult[] }` — un resultado por sub-fuente.
 
@@ -186,13 +177,11 @@ Contexto: las push notifications (Google Wallet, Bancolombia) insertan en tiempo
 
 8.5. Los errores SHALL mapearse a mensajes en español vía `ERROR_MESSAGES`, agregando `GMAIL_AUTH_REQUIRED` y `GMAIL_API_ERROR`.
 
----
+### Requirement 9: Cierre mensual y cron
 
-## Requirement 9 — Cierre mensual y cron
+**User Story:** Como usuario, quiero que el cierre de mes marque solo los ítems Gmail efectivamente cargados, y que el cron nocturno incluya Gmail.
 
-**User story:** Como usuario, quiero que el cierre de mes marque solo los ítems Gmail efectivamente cargados, y que el cron nocturno incluya Gmail.
-
-### Acceptance criteria
+#### Acceptance Criteria
 
 9.1. WHEN un run de Gmail para el mes M termina una sub-fuente **sin errores**, THEN el sistema SHALL marcar el `monthly_close_items` correspondiente (`item_type = 'gmail_auto'`, match por `source`: "Bancolombia" ↔ sync_gmail_bancolombia, "Arriendo" ↔ sync_gmail_arriendo) como `status = 'cargado'` con `loaded_at = now()`, vía Supabase admin client.
 
@@ -202,9 +191,11 @@ Contexto: las push notifications (Google Wallet, Bancolombia) insertan en tiempo
 
 9.4. WHEN el cron corre los primeros 5 días del mes, THEN SHALL sincronizar también el mes anterior (los emails de fin de mes pueden llegar tarde y el cierre del mes anterior sigue abierto).
 
----
+### Requirement 10: Fuera de alcance v1
 
-## Requirement 10 — Fuera de alcance v1 (documentado)
+**User Story:** Como equipo de desarrollo, quiero documentar explícitamente lo que queda fuera del alcance de v1, para evitar scope creep y tener un plan claro de evolución.
+
+#### Acceptance Criteria
 
 10.1. **BBVA (extractos Visa/Mastercard)**: el email no adjunta el PDF (solo link detrás de login) → no es parseable desde Gmail. El ítem de cierre mensual `extracto_pdf` de BBVA SHALL permanecer manual. El diseño SHALL dejar el slot de fuente `sync_gmail_bbva` documentado para una v2 (alternativas: aviso "TRANSFERENCIA INMEDIATA DEBITADA" de `avisos@bbva.com.ar` como señal parcial, o upload manual del PDF).
 

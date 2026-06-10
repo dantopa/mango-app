@@ -10,6 +10,7 @@ export interface CandidateTransaction {
   account_name: string; // "Bancolombia" | "Nexo Card"
   source: SyncSource;
   expense_type?: "fixed" | "variable"; // defaults to "variable" if not set
+  card_last4?: string | null; // últimos 4 dígitos de la tarjeta (*5685, ••5685) — clave fuerte de dedup
 }
 
 export type SyncSource =

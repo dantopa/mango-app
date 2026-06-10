@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+export const maxDuration = 60;
+
 import { createClient } from "@/lib/supabase/server";
 import { runGmailMonth } from "@/lib/sync/gmail/orchestrator";
 import { GmailAuthError, GmailApiError } from "@/lib/sync/gmail/client";

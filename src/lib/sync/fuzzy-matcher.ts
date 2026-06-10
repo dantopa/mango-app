@@ -80,6 +80,7 @@ function levenshtein(a: string, b: string): number {
  * Reglas:
  * - Iguales → match
  * - Uno es prefijo del otro → match (truncamiento)
+ * - Token containment: tokens(corto) ⊆ tokens(largo) → match
  * - Diferencia <= 3 chars (Levenshtein) → ambiguous
  * - Diferencia > 3 chars sin relación de prefijo → no_match
  */
@@ -101,6 +102,13 @@ export function compareMerchants(
 
   // Prefix check — one is prefix of the other (truncation tolerance)
   if (normA.startsWith(normB) || normB.startsWith(normA)) return "match";
+
+  // Token containment — all tokens of the shorter string are contained in the longer one
+  const tokensA = normA.split(" ").filter((t) => t.length > 0);
+  const tokensB = normB.split(" ").filter((t) => t.length > 0);
+  const [shorter, longer] =
+    tokensA.length <= tokensB.length ? [tokensA, tokensB] : [tokensB, tokensA];
+  if (shorter.length > 0 && shorter.every((t) => longer.includes(t))) return "match";
 
   // Levenshtein distance
   const distance = levenshtein(normA, normB);

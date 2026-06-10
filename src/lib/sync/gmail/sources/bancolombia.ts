@@ -16,6 +16,7 @@ const RE_TRANSFERENCIA = /transferiste \$[\d.,]+ desde tu cuenta/i;
 
 const RE_AMOUNT = /\$([\d.,]+)/;
 const RE_DATE = /(\d{2}\/\d{2}\/\d{2,4})/;
+const RE_CARD_LAST4 = /\*(\d{4})/;
 
 /**
  * Build the Gmail search query for Bancolombia emails in a given month.
@@ -100,6 +101,10 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
     return [];
   }
 
+  // Extract card last 4 digits (pattern: *NNNN)
+  const cardMatch = text.match(RE_CARD_LAST4);
+  const card_last4 = cardMatch ? cardMatch[1] : null;
+
   return [
     {
       amount_native: amount,
@@ -109,6 +114,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
       description_raw: text.trim(),
       account_name: "Bancolombia",
       source: "sync_gmail_bancolombia",
+      card_last4,
     },
   ];
 }

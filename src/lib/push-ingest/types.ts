@@ -17,6 +17,7 @@ export type ParsedTransaction = {
   tx_date: string; // YYYY-MM-DD
   description_raw: string;
   account_name: string;
+  card_last4?: string | null; // últimos 4 dígitos de la tarjeta — clave de dedup
 };
 
 /** Tipo de función parser */
