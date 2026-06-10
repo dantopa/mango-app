@@ -81,22 +81,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function extractNexoToken() {
-    const jsessionid = await getCookie('platform.nexo.com', 'JSESSIONID');
-    const nsi = await getCookie('platform.nexo.com', 'nsi');
-    const esi = await getCookie('platform.nexo.com', 'esi');
-    const installationId = await getCookie('platform.nexo.com', 'nexo_installation_id');
+    // Nexo uses cookies on .nexo.com domain (not platform.nexo.com specifically)
+    const nsi = await getCookie('platform.nexo.com', 'nsi') || await getCookieByDomain('.nexo.com', 'nsi');
+    const esi = await getCookie('platform.nexo.com', 'esi') || await getCookieByDomain('.nexo.com', 'esi');
+    const sessionId = await getCookie('platform.nexo.com', 'nexo_session_id') || await getCookieByDomain('.nexo.com', 'nexo_session_id');
+    const installationId = await getCookie('platform.nexo.com', 'nexo_installation_id') || await getCookieByDomain('.nexo.com', 'nexo_installation_id');
 
-    if (!jsessionid) {
-      setStatus('error', '❌ JSESSIONID no encontrado. ¿Logueado en platform.nexo.com?');
-      return null;
-    }
+    console.log('[Nexo Token Pusher] Found:', { nsi: !!nsi, esi: !!esi, sessionId: !!sessionId, installationId: !!installationId });
+
     if (!nsi || !esi) {
-      setStatus('error', '❌ Faltan cookies nsi/esi de Nexo');
+      setStatus('error', '❌ Faltan cookies nsi/esi de Nexo. ¿Logueado en platform.nexo.com?');
       return null;
     }
 
+    // New token format: nexo_session_id replaces JSESSIONID
     return JSON.stringify({
-      jsessionid, nsi, esi,
+      jsessionid: sessionId || 'none',
+      nsi,
+      esi,
       installation_id: installationId || 'unknown'
     });
   }
@@ -127,5 +129,12 @@ async function getCookie(domain, name) {
   try {
     const cookie = await chrome.cookies.get({ url: `https://${domain}`, name });
     return cookie ? cookie.value : null;
+  } catch (e) { return null; }
+}
+
+async function getCookieByDomain(domain, name) {
+  try {
+    const cookies = await chrome.cookies.getAll({ domain, name });
+    return cookies.length > 0 ? cookies[0].value : null;
   } catch (e) { return null; }
 }

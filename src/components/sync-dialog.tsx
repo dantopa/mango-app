@@ -1,0 +1,232 @@
+"use client";
+
+import * as React from "react";
+import { RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+
+import { useSync } from "@/hooks/use-sync";
+import type { SyncSource, SyncSourceResult } from "@/lib/sync/types";
+import { ERROR_MESSAGES } from "@/lib/sync/types";
+import { formatMonth } from "@/lib/format";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface SyncDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+const SOURCES: { id: SyncSource; label: string }[] = [
+  { id: "sync_bancolombia", label: "Bancolombia" },
+  { id: "sync_nexo", label: "Nexo Card" },
+];
+
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getMonthOptions(): string[] {
+  const options: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    options.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return options;
+}
+
+export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
+  const { startSync, progress, reset } = useSync();
+  const [month, setMonth] = React.useState(getCurrentMonth);
+  const [selectedSources, setSelectedSources] = React.useState<Set<SyncSource>>(
+    new Set(SOURCES.map((s) => s.id))
+  );
+
+  const monthOptions = React.useMemo(getMonthOptions, []);
+
+  function toggleSource(source: SyncSource) {
+    setSelectedSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+  }
+
+  function handleStart() {
+    startSync({
+      month,
+      sources: SOURCES.filter((s) => selectedSources.has(s.id)).map((s) => s.id),
+    });
+  }
+
+  function handleClose(isOpen: boolean) {
+    if (!isOpen && progress.status !== "running") {
+      reset();
+    }
+    if (progress.status !== "running") {
+      onOpenChange(isOpen);
+    }
+  }
+
+  const totalInserted = progress.completed.reduce((sum, r) => sum + r.inserted, 0);
+  const totalDuplicates = progress.completed.reduce((sum, r) => sum + r.duplicates, 0);
+  const totalReview = progress.completed.reduce((sum, r) => sum + r.needs_review, 0);
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RefreshCw className="size-5" />
+            Sincronizar transacciones
+          </DialogTitle>
+          <DialogDescription>
+            Reconciliá gastos de tus cuentas para el mes seleccionado.
+          </DialogDescription>
+        </DialogHeader>
+
+        {progress.status === "idle" && (
+          <div className="flex flex-col gap-4 pt-2">
+            {/* Month selector */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">Mes</label>
+              <Select value={month} onValueChange={setMonth}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {monthOptions.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {formatMonth(m + "-01")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Source checkboxes */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">Fuentes</label>
+              <div className="flex flex-col gap-2">
+                {SOURCES.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedSources.has(s.id)}
+                      onChange={() => toggleSource(s.id)}
+                      className="size-4 rounded border-border"
+                    />
+                    {s.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <Button
+              onClick={handleStart}
+              disabled={selectedSources.size === 0}
+              className="w-full"
+            >
+              Iniciar sincronización
+            </Button>
+          </div>
+        )}
+
+        {progress.status === "running" && (
+          <div className="flex flex-col gap-3 pt-2">
+            {progress.current_source && (
+              <div className="flex items-center gap-2 text-sm">
+                <Loader2 className="size-4 animate-spin text-primary" />
+                <span>
+                  Sincronizando{" "}
+                  {SOURCES.find((s) => s.id === progress.current_source)?.label ?? "..."}
+                </span>
+              </div>
+            )}
+            {progress.completed.map((r) => (
+              <SourceResult key={r.source} result={r} />
+            ))}
+            {progress.errors.map((e) => (
+              <div key={e.source} className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="size-4" />
+                <span>
+                  {SOURCES.find((s) => s.id === e.source)?.label}: {e.error}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {progress.status === "done" && (
+          <div className="flex flex-col gap-4 pt-2">
+            {/* Per-source results */}
+            {progress.completed.map((r) => (
+              <SourceResult key={r.source} result={r} />
+            ))}
+            {progress.errors.map((e) => (
+              <div key={e.source} className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="size-4" />
+                <span>
+                  {SOURCES.find((s) => s.id === e.source)?.label}: {e.error}
+                </span>
+              </div>
+            ))}
+
+            {/* Summary */}
+            <div className="rounded-lg border bg-muted/50 p-3">
+              <p className="text-sm font-medium">Resumen</p>
+              <div className="mt-1.5 grid grid-cols-3 gap-2 text-center text-xs">
+                <div>
+                  <p className="text-lg font-bold text-primary">{totalInserted}</p>
+                  <p className="text-muted-foreground">nuevas</p>
+                </div>
+                <div>
+                  <p className="text-lg font-bold">{totalDuplicates}</p>
+                  <p className="text-muted-foreground">duplicados</p>
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-amber-500">{totalReview}</p>
+                  <p className="text-muted-foreground">para revisión</p>
+                </div>
+              </div>
+            </div>
+
+            <Button variant="outline" onClick={() => handleClose(false)} className="w-full">
+              Cerrar
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SourceResult({ result }: { result: SyncSourceResult }) {
+  const label = SOURCES.find((s) => s.id === result.source)?.label ?? result.source;
+  return (
+    <div className="flex items-start gap-2 text-sm">
+      <CheckCircle2 className="mt-0.5 size-4 text-green-500" />
+      <div>
+        <p className="font-medium">{label}</p>
+        <p className="text-muted-foreground">
+          {result.found} encontradas · {result.inserted} nuevas · {result.duplicates} duplicados
+          {result.needs_review > 0 && ` · ${result.needs_review} para revisión`}
+        </p>
+      </div>
+    </div>
+  );
+}

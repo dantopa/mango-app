@@ -10,7 +10,7 @@ import type { NexoSessionToken, ProviderModule, ToolResult } from "../types.ts";
 import { redactToken, sanitizeError } from "../security.ts";
 
 const NEXO_BASE = "https://platform.nexo.com";
-const BALANCES_PATH = "/api/1/get_balances";
+const BALANCES_PATH = "/api/trading/advanced/facade/api/v1/balances";
 const ENVELOPES_PATH = "/api/platform/envelope/v1/envelopes";
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -43,7 +43,7 @@ export const nexoProvider: ProviderModule = {
     let sessionToken: NexoSessionToken;
     try {
       sessionToken = JSON.parse(token) as NexoSessionToken;
-      if (!sessionToken.jsessionid || !sessionToken.nsi || !sessionToken.esi || !sessionToken.installation_id) {
+      if (!sessionToken.nsi || !sessionToken.esi || !sessionToken.installation_id) {
         throw new Error("Missing fields");
       }
     } catch {
@@ -68,11 +68,19 @@ function errorResult(msg: string): ToolResult {
 }
 
 function buildHeaders(s: NexoSessionToken): Record<string, string> {
+  // Nexo no longer uses JSESSIONID — session is via nsi + esi + nexo_session_id cookies
+  const cookieParts = [`nsi=${s.nsi}`, `esi=${s.esi}`];
+  if (s.jsessionid && s.jsessionid !== 'none') {
+    cookieParts.push(`nexo_session_id=${s.jsessionid}`);
+  }
+  cookieParts.push(`nexo_installation_id=${s.installation_id}`);
+
   return {
-    Cookie: `JSESSIONID=${s.jsessionid}; nsi=${s.nsi}; esi=${s.esi}`,
+    Cookie: cookieParts.join("; "),
     "x-nexo-installation-id": s.installation_id,
     correlationid: crypto.randomUUID(),
     "platform-name": "Web",
+    accept: "application/json",
     origin: NEXO_BASE,
     referer: `${NEXO_BASE}/`,
     "content-type": "application/json",
@@ -108,7 +116,7 @@ async function nexoFetch(
 // --- Balances ----------------------------------------------------------------
 
 async function handleGetBalances(s: NexoSessionToken, token: string): Promise<ToolResult> {
-  const res = await nexoFetch(`${NEXO_BASE}${BALANCES_PATH}`, s, token);
+  const res = await nexoFetch(`${NEXO_BASE}${BALANCES_PATH}`, s, token, "GET");
   if (!(res instanceof Response)) return res;
   const data = await res.json();
   return { content: [{ type: "text", text: JSON.stringify(formatBalances(data)) }] };

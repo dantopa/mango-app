@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Bike, Car, Filter, Receipt, Sparkle, X } from "lucide-react";
+import { Bike, Car, Filter, Receipt, RefreshCw, Sparkle, X } from "lucide-react";
 
 import { useAccounts, useCategories, useTransactions } from "@/hooks/use-finance";
 import {
@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { SyncDialog } from "@/components/sync-dialog";
 
 type FacetKey = keyof Omit<SpendFilters, "search">;
 
@@ -62,6 +63,7 @@ export default function GastosPage() {
   const [month, setMonth] = React.useState<string | null>(null);
   const [excludeExtra, setExcludeExtra] = React.useState(false);
   const [filters, setFilters] = React.useState<SpendFilters>(emptyFilters);
+  const [syncOpen, setSyncOpen] = React.useState(false);
 
   const months = React.useMemo(
     () => (txns.data ? monthsPresent(txns.data) : []),
@@ -161,6 +163,10 @@ export default function GastosPage() {
         description="Análisis de tus consumos por período y dimensión."
         action={
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+            <Button variant="outline" size="sm" onClick={() => setSyncOpen(true)}>
+              <RefreshCw className="mr-1.5 size-4" />
+              Sincronizar
+            </Button>
             <label className="flex items-center justify-between gap-2 text-sm text-muted-foreground sm:justify-start">
               Excluir extraordinarios
               <Switch checked={excludeExtra} onCheckedChange={setExcludeExtra} />
@@ -180,6 +186,7 @@ export default function GastosPage() {
           </div>
         }
       />
+      <SyncDialog open={syncOpen} onOpenChange={setSyncOpen} />
 
       {/* Pattern stats */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

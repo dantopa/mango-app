@@ -1,0 +1,161 @@
+import type { CandidateTransaction, SyncSourceResult } from "./types";
+import { evaluateCandidate } from "./dedup-sync";
+import { resolveRate, calculateUsd } from "../push-ingest/fx";
+import { categorize } from "../push-ingest/categorizer";
+import { classifyTransaction } from "../push-ingest/classifier";
+import { getSupabaseAdmin } from "../push-ingest/supabase-admin";
+
+/**
+ * Procesa un batch de candidatas: dedup → FX → classify → categorize → insert.
+ * Cada candidata se procesa independientemente (fallo en una no afecta las demás).
+ */
+export async function processCandidates(
+  candidates: CandidateTransaction[],
+  userId: string,
+  month: string
+): Promise<SyncSourceResult> {
+  const source = candidates[0]?.source ?? "sync_bancolombia";
+  const result: SyncSourceResult = {
+    source,
+    found: candidates.length,
+    inserted: 0,
+    duplicates: 0,
+    needs_review: 0,
+    errors: [],
+  };
+
+  if (candidates.length === 0) return result;
+
+  const monthStart = `${month}-01`;
+  const monthEnd = getMonthEnd(month);
+
+  const supabase = getSupabaseAdmin();
+
+  // Resolve account_id for this source's account_name
+  const accountName = candidates[0].account_name;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: account, error: accountError } = await (supabase as any)
+    .from("accounts")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("name", accountName)
+    .single();
+
+  if (accountError || !account) {
+    result.errors.push(
+      `No se encontró la cuenta "${accountName}" para el usuario.`
+    );
+    return result;
+  }
+
+  const accountId = account.id;
+
+  for (const candidate of candidates) {
+    try {
+      // 1. Dedup
+      const decision = await evaluateCandidate(
+        candidate,
+        userId,
+        monthStart,
+        monthEnd
+      );
+
+      if (decision.action === "discard") {
+        result.duplicates++;
+        continue;
+      }
+
+      // 2. FX conversion
+      let fxRate: number;
+      let amountUsd: number;
+
+      if (candidate.native_currency === "USD") {
+        fxRate = 1;
+        amountUsd = candidate.amount_native;
+      } else {
+        const fxResult = await resolveRate(candidate.native_currency);
+        if (!fxResult.ok) {
+          result.errors.push(
+            `FX error for ${candidate.merchant ?? "unknown"} (${candidate.tx_date}): ${fxResult.reason}`
+          );
+          continue;
+        }
+        fxRate = fxResult.rate;
+        amountUsd = calculateUsd(candidate.amount_native, fxRate);
+      }
+
+      // 3. Classify (transfer detection)
+      const classification = await classifyTransaction(
+        {
+          merchant: candidate.merchant,
+          description_raw: candidate.description_raw,
+        },
+        userId
+      );
+
+      const isPayment = classification.type === "transfer";
+
+      // 4. Categorize
+      const categorizationResult = await categorize(candidate.merchant, userId);
+
+      const categoryId = categorizationResult.matched
+        ? categorizationResult.category_id
+        : null;
+
+      // Determine needs_review
+      const needsReview =
+        decision.action === "insert_review" ||
+        !categorizationResult.matched ||
+        classification.type === "unknown";
+
+      // 5. Insert into transactions
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: insertError } = await (supabase as any)
+        .from("transactions")
+        .insert({
+          user_id: userId,
+          account_id: accountId,
+          tx_date: candidate.tx_date,
+          description_raw: candidate.description_raw,
+          merchant: candidate.merchant,
+          amount_native: candidate.amount_native,
+          native_currency: candidate.native_currency,
+          fx_rate_to_usd: fxRate,
+          amount_usd: amountUsd,
+          category_id: categoryId,
+          is_payment: isPayment,
+          needs_review: needsReview,
+          source: candidate.source,
+          country: "CO",
+          expense_type: "variable",
+        });
+
+      if (insertError) {
+        result.errors.push(
+          `INSERT error for ${candidate.merchant ?? "unknown"} (${candidate.tx_date}): ${insertError.message}`
+        );
+        continue;
+      }
+
+      result.inserted++;
+      if (needsReview) {
+        result.needs_review++;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result.errors.push(
+        `Error processing ${candidate.merchant ?? "unknown"} (${candidate.tx_date}): ${msg}`
+      );
+    }
+  }
+
+  return result;
+}
+
+/** Helper: get last day of a month from "YYYY-MM" */
+function getMonthEnd(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  // Day 0 of next month = last day of current month
+  const lastDay = new Date(year, m, 0).getDate();
+  return `${month}-${String(lastDay).padStart(2, "0")}`;
+}
