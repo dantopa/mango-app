@@ -74,7 +74,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
       merchant: "Arriendo",
       tx_date: txDate,
       description_raw: descriptionRaw,
-      account_name: "Bancolombia",
+      account_name: "Bancolombia Ahorros",
       source: "sync_gmail_arriendo",
       expense_type: "fixed",
     },
@@ -84,7 +84,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
 export const arriendoDef: GmailSourceDef = {
   id: "arriendo",
   syncSource: "sync_gmail_arriendo",
-  accountName: "Bancolombia",
+  accountName: "Bancolombia Ahorros",
   closeItemSource: "Arriendo",
   requiresResults: true,
   buildQuery,

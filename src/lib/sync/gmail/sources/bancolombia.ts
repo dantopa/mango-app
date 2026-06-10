@@ -112,7 +112,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
       merchant,
       tx_date: txDate,
       description_raw: text.trim(),
-      account_name: "Bancolombia",
+      account_name: "Bancolombia Débito",
       source: "sync_gmail_bancolombia",
       card_last4,
     },
@@ -122,7 +122,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
 export const bancolombiaDef: GmailSourceDef = {
   id: "bancolombia",
   syncSource: "sync_gmail_bancolombia",
-  accountName: "Bancolombia",
+  accountName: "Bancolombia Débito",
   closeItemSource: "Bancolombia",
   buildQuery,
   parse,

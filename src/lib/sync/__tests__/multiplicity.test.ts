@@ -95,7 +95,7 @@ describe("Multiplicity — Req 7.9", () => {
       merchant: "PQUE ECOLOGICO",
       tx_date: "2026-05-31",
       description_raw: "Compraste $9.500 en PQUE ECOLOGICO con tu T.Deb *5685",
-      account_name: "Bancolombia",
+      account_name: "Bancolombia Débito",
       source: "sync_gmail_bancolombia",
     };
 
@@ -157,7 +157,7 @@ describe("Multiplicity — Req 7.9", () => {
       merchant: "PQUE ECOLOGICO",
       tx_date: "2026-05-31",
       description_raw: "Compra $9500 PQUE ECOLOGICO",
-      account_name: "Bancolombia",
+      account_name: "Bancolombia Débito",
       source: "sync_gmail_bancolombia",
     };
 
@@ -198,7 +198,7 @@ describe("Multiplicity — Req 7.9", () => {
       merchant: "PQUE ECOLOGICO",
       tx_date: "2026-05-31",
       description_raw: "Compra $9500 PQUE ECOLOGICO",
-      account_name: "Bancolombia",
+      account_name: "Bancolombia Débito",
       source: "sync_gmail_bancolombia",
     };
 
@@ -232,7 +232,7 @@ describe("Multiplicity — Req 7.9", () => {
       merchant: "PERGAMINO VIVA ENVIG",
       tx_date: "2026-06-09",
       description_raw: "Compraste $7.500 en PERGAMINO VIVA ENVIG con tu T.Deb *5685",
-      account_name: "Bancolombia",
+      account_name: "Bancolombia Débito",
       source: "sync_gmail_bancolombia",
     };
 

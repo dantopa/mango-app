@@ -48,7 +48,7 @@ describe("Arriendo (Palomma) Gmail parser", () => {
       expect(result[0].description_raw).toBe(
         "Canon Inmueble TV 32A SUR 31 E 47 AP 201 · Ref: 010863808323"
       );
-      expect(result[0].account_name).toBe("Bancolombia");
+      expect(result[0].account_name).toBe("Bancolombia Ahorros");
       expect(result[0].source).toBe("sync_gmail_arriendo");
       expect((result[0] as Record<string, unknown>).expense_type).toBe("fixed");
     });

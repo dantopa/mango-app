@@ -85,7 +85,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
       merchant,
       tx_date: txDate,
       description_raw: text.trim().slice(0, 200),
-      account_name: "RappiCard",
+      account_name: "Rappi",
       source: "sync_gmail_rappicard",
       card_last4,
     },
@@ -95,7 +95,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
 export const rappicardDef: GmailSourceDef = {
   id: "rappicard",
   syncSource: "sync_gmail_rappicard",
-  accountName: "RappiCard",
+  accountName: "Rappi",
   closeItemSource: null,
   buildQuery,
   parse,

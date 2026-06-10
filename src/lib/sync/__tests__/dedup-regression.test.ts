@@ -107,7 +107,7 @@ describe("Dedup Regression — Req 7.6–7.12", () => {
         tx_date: "2026-06-09",
         description_raw:
           "Compraste $7.500,00 en PERGAMINO VIVA ENVIG con tu T.Deb *5685, el 09/06/2026 a las 15:29.",
-        account_name: "Bancolombia",
+        account_name: "Bancolombia Débito",
         source: "sync_gmail_bancolombia",
         card_last4: "5685",
       };
@@ -157,7 +157,7 @@ describe("Dedup Regression — Req 7.6–7.12", () => {
         tx_date: "2026-06-10",
         description_raw:
           "Compraste $63.400,00 en BOLD SA*COYO TACUARA con tu T.Deb *5685, el 10/06/2026.",
-        account_name: "Bancolombia",
+        account_name: "Bancolombia Débito",
         source: "sync_gmail_bancolombia",
         card_last4: "5685",
       };
@@ -203,7 +203,7 @@ describe("Dedup Regression — Req 7.6–7.12", () => {
         merchant: "EXITO ENVIGADO",
         tx_date: "2026-06-16",
         description_raw: "Compraste $45.000,00 en EXITO ENVIGADO el 16/06/2026.",
-        account_name: "Bancolombia",
+        account_name: "Bancolombia Débito",
         source: "sync_gmail_bancolombia",
       };
 
@@ -237,7 +237,7 @@ describe("Dedup Regression — Req 7.6–7.12", () => {
         merchant: "EXITO ENVIGADO",
         tx_date: "2026-06-17",
         description_raw: "Compraste $45.000,00 en EXITO ENVIGADO el 17/06/2026.",
-        account_name: "Bancolombia",
+        account_name: "Bancolombia Débito",
         source: "sync_gmail_bancolombia",
       };
 
@@ -287,7 +287,7 @@ describe("Dedup Regression — Req 7.6–7.12", () => {
         merchant: "PQUE ECOLOGICO",
         tx_date: "2026-06-08",
         description_raw: "Compraste $9.500,00 en PQUE ECOLOGICO el 08/06/2026.",
-        account_name: "Bancolombia",
+        account_name: "Bancolombia Débito",
         source: "sync_gmail_bancolombia",
       };
 
@@ -349,7 +349,7 @@ describe("Dedup Regression — Req 7.6–7.12", () => {
         tx_date: "2026-06-12",
         description_raw:
           "Compraste $25.000,00 en RESTAURANTE EL CIELO con tu T.Deb *5685, el 12/06/2026.",
-        account_name: "Bancolombia",
+        account_name: "Bancolombia Débito",
         source: "sync_gmail_bancolombia",
         card_last4: "5685",
       };
@@ -393,7 +393,7 @@ describe("Dedup Regression — Req 7.6–7.12", () => {
         tx_date: "2026-06-12",
         description_raw:
           "Compraste $25.000,00 en RESTAURANTE EL CIELO el 12/06/2026.",
-        account_name: "Bancolombia",
+        account_name: "Bancolombia Débito",
         source: "sync_gmail_bancolombia",
       };
 

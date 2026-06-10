@@ -44,7 +44,7 @@ describe("Bancolombia Gmail parser", () => {
       expect(result[0].tx_date).toBe("2026-06-09");
       expect(result[0].native_currency).toBe("COP");
       expect(result[0].source).toBe("sync_gmail_bancolombia");
-      expect(result[0].account_name).toBe("Bancolombia");
+      expect(result[0].account_name).toBe("Bancolombia Débito");
     });
 
     it("PAGO SERVICIO: extracts beneficiary as merchant", () => {
