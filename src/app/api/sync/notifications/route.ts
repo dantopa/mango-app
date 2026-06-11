@@ -41,6 +41,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     "com.bbva.nxt_argentina",
     "com.grability.rappi",
     "com.nexowallet",
+    "com.nequi.MobileApp",
     "com.google.android.apps.messaging",   // SMS (Google Messages)
     "com.samsung.android.messaging",       // SMS (Samsung Messages)
     "com.android.mms",                     // SMS (AOSP)
@@ -65,6 +66,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     duplicates: 0,
     needs_review: 0,
     errors: [],
+    items: [],
   };
 
   for (const log of rawLogs ?? []) {
@@ -83,19 +85,47 @@ export async function POST(request: Request): Promise<NextResponse> {
       switch (pipelineResult.status) {
         case "registered":
           result.inserted++;
+          result.items!.push({
+            merchant: String(raw.title ?? raw.text ?? "").substring(0, 50),
+            amount: 0, // not easily available from pipeline result
+            currency: "COP",
+            date: new Date(log.received_at).toISOString().substring(0, 10),
+            status: "inserted",
+          });
           break;
         case "duplicate":
         case "deduped_cross_source":
           result.duplicates++;
+          result.items!.push({
+            merchant: String(raw.title ?? raw.text ?? "").substring(0, 50),
+            amount: 0,
+            currency: "COP",
+            date: new Date(log.received_at).toISOString().substring(0, 10),
+            status: "duplicate",
+          });
           break;
         case "no_parser":
-          // Skip silently
+          // Skip silently — not financial or can't parse
           break;
         case "fx_pending":
           result.needs_review++;
+          result.items!.push({
+            merchant: String(raw.title ?? raw.text ?? "").substring(0, 50),
+            amount: 0,
+            currency: "COP",
+            date: new Date(log.received_at).toISOString().substring(0, 10),
+            status: "review",
+          });
           break;
         case "registration_failed":
           result.errors.push(pipelineResult.error);
+          result.items!.push({
+            merchant: String(raw.title ?? raw.text ?? "").substring(0, 50),
+            amount: 0,
+            currency: "COP",
+            date: new Date(log.received_at).toISOString().substring(0, 10),
+            status: "error",
+          });
           break;
       }
     } catch (err) {
