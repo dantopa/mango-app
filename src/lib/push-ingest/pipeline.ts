@@ -53,39 +53,13 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase = getSupabaseAdmin() as any;
 
-  // If LLM detected this for the first time, hold for confirmation
+  // If LLM detected this for the first time, decide: known financial package → insert directly, unknown → hold for confirmation
   if (isLlmFirstTime) {
-    await supabase.from("push_ingest_log").insert({
-      dedup_key: dedupKey,
-      user_id: OWNER_USER_ID,
-      package_name: payload.packageName,
-      amount_native: parsed.amount_native,
-      native_currency: parsed.native_currency,
-      merchant: parsed.merchant,
-      status: "pending_confirmation",
-      pending_data: JSON.stringify(parsed),
-    });
-
-    // Send push notification asking for confirmation
-    try {
-      const amountFormatted = `${parsed.native_currency} ${parsed.amount_native.toLocaleString("es-CO")}`;
-      await sendPushNotification(OWNER_USER_ID, {
-        title: "🆕 Nueva fuente detectada",
-        body: `${parsed.merchant ?? payload.packageName}: ${amountFormatted}. Confirmá en la app.`,
-        tag: `confirm-${dedupKey}`,
-        data: { url: "/gastos", action: "confirm_push", dedup_key: dedupKey },
-      });
-    } catch (e) {
-      console.error("[push-ingest][confirm-notify] error:", e);
-    }
-
-    return {
-      status: "pending_confirmation",
-      dedup_key: dedupKey,
-      merchant: parsed.merchant,
-      amount: parsed.amount_native,
-      currency: parsed.native_currency,
-    };
+    // Known financial packages: trust the LLM extraction and insert directly
+    // Confirmation is only for completely unknown packages not in the whitelist
+    // (which can't happen here since we only call LLM for whitelisted packages)
+    // So: always insert directly from LLM fallback. The template is already saved.
+    console.log(`[push-ingest] LLM extracted: ${parsed.merchant} ${parsed.amount_native} ${parsed.native_currency} — inserting directly`);
   }
 
   await supabase.from("push_ingest_log").insert({
