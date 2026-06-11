@@ -83,6 +83,14 @@ export async function callMcpTool(
     try {
       return JSON.parse(text);
     } catch {
+      // Check if the text is an error message from the provider
+      if (text.startsWith("ERROR:")) {
+        // Detect auth expiration from provider error messages
+        if (text.toLowerCase().includes("expired") || text.toLowerCase().includes("re-login")) {
+          throw new McpError("AUTH_EXPIRED", text.slice(7).trim());
+        }
+        throw new McpError("MCP_ERROR", text.slice(7).trim());
+      }
       throw new McpError(
         "MCP_ERROR",
         text.slice(0, 200) || "Contenido MCP no es JSON válido"
