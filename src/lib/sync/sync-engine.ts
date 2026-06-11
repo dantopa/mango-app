@@ -26,6 +26,7 @@ export async function processCandidates(
     duplicates: 0,
     needs_review: 0,
     errors: [],
+    items: [],
   };
 
   if (candidates.length === 0) return result;
@@ -73,6 +74,14 @@ export async function processCandidates(
 
       if (decision.action === "discard") {
         result.duplicates++;
+        result.items!.push({
+          merchant: candidate.merchant,
+          amount: candidate.amount_native,
+          currency: candidate.native_currency,
+          date: candidate.tx_date,
+          status: "duplicate",
+          account_name: candidate.account_name,
+        });
         continue;
       }
 
@@ -173,6 +182,23 @@ export async function processCandidates(
       result.inserted++;
       if (needsReview) {
         result.needs_review++;
+        result.items!.push({
+          merchant: candidate.merchant,
+          amount: candidate.amount_native,
+          currency: candidate.native_currency,
+          date: candidate.tx_date,
+          status: "review",
+          account_name: candidate.account_name,
+        });
+      } else {
+        result.items!.push({
+          merchant: candidate.merchant,
+          amount: candidate.amount_native,
+          currency: candidate.native_currency,
+          date: candidate.tx_date,
+          status: "inserted",
+          account_name: candidate.account_name,
+        });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

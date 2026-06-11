@@ -37,6 +37,17 @@ export interface SyncSourceResult {
   duplicates: number;
   needs_review: number;
   errors: string[];
+  items?: SyncItemDetail[];
+}
+
+/** Detalle de cada item procesado (para debug/visibilidad) */
+export interface SyncItemDetail {
+  merchant: string | null;
+  amount: number;
+  currency: string;
+  date: string;
+  status: "inserted" | "duplicate" | "review" | "error";
+  account_name?: string;
 }
 
 /** Request body del Route Handler */

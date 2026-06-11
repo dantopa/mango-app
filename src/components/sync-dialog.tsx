@@ -263,6 +263,7 @@ function SourceResult({ result }: { result: SyncSourceResult }) {
     SOURCES.find((s) => s.id === result.source)?.label ??
     result.source;
   const hasErrors = result.errors.length > 0;
+  const hasItems = result.items && result.items.length > 0;
   return (
     <div className="flex items-start gap-2 text-sm">
       {hasErrors ? (
@@ -270,13 +271,34 @@ function SourceResult({ result }: { result: SyncSourceResult }) {
       ) : (
         <CheckCircle2 className="mt-0.5 size-4 text-green-500" />
       )}
-      <div>
+      <div className="flex-1 min-w-0">
         <p className="font-medium">{label}</p>
         <p className="text-muted-foreground">
           {result.found} encontradas · {result.inserted} nuevas · {result.duplicates} duplicados
           {result.needs_review > 0 && ` · ${result.needs_review} para revisión`}
           {hasErrors && ` · ${result.errors.length} errores`}
         </p>
+        {hasItems && (
+          <ul className="mt-1.5 space-y-0.5 text-xs">
+            {result.items!.map((item, i) => (
+              <li key={i} className="flex items-center gap-1.5">
+                <span className={
+                  item.status === "inserted" ? "text-green-500" :
+                  item.status === "duplicate" ? "text-muted-foreground" :
+                  item.status === "review" ? "text-amber-500" :
+                  "text-destructive"
+                }>
+                  {item.status === "inserted" ? "✓" : item.status === "duplicate" ? "=" : item.status === "review" ? "?" : "✗"}
+                </span>
+                <span className="truncate">{item.merchant || "—"}</span>
+                <span className="ml-auto shrink-0 tabular-nums">
+                  {item.currency} {item.amount.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="shrink-0 text-muted-foreground">{item.date}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         {hasErrors && (
           <ul className="mt-1 list-inside list-disc text-xs text-destructive">
             {result.errors.slice(0, 5).map((e, i) => (
