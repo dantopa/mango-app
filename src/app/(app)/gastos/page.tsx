@@ -31,8 +31,7 @@ import { ChangeIndicator } from "@/components/change-indicator";
 import { FilterChips, type ChipOption } from "@/components/filter-chips";
 import { LoadingState, ErrorState, EmptyState } from "@/components/states";
 import { TransactionsTable } from "@/components/transactions-table";
-import { CategoryPieChart } from "@/components/charts/category-pie-chart";
-import { CategoryBarChart } from "@/components/charts/category-bar-chart";
+import { LazyCategoryPieChart, LazyCategoryBarChart, LazySyncDialog } from "@/components/lazy";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -51,7 +50,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { SyncDialog } from "@/components/sync-dialog";
 
 type FacetKey = keyof Omit<SpendFilters, "search">;
 
@@ -186,7 +184,7 @@ export default function GastosPage() {
           </div>
         }
       />
-      <SyncDialog open={syncOpen} onOpenChange={setSyncOpen} />
+      <LazySyncDialog open={syncOpen} onOpenChange={setSyncOpen} />
 
       {/* Pattern stats */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
@@ -314,11 +312,11 @@ export default function GastosPage() {
                   <TabsTrigger value="barras">Barras</TabsTrigger>
                 </TabsList>
                 <TabsContent value="torta">
-                  <CategoryPieChart data={view.byCategory} />
+                  <LazyCategoryPieChart data={view.byCategory} />
                   <Legend data={view.byCategory} />
                 </TabsContent>
                 <TabsContent value="barras">
-                  <CategoryBarChart data={view.byCategory} />
+                  <LazyCategoryBarChart data={view.byCategory} />
                 </TabsContent>
               </Tabs>
             )}
@@ -380,7 +378,7 @@ export default function GastosPage() {
               <EmptyChart />
             ) : (
               <>
-                <CategoryPieChart data={view.byExpenseType} />
+                <LazyCategoryPieChart data={view.byExpenseType} />
                 <Legend data={view.byExpenseType} />
               </>
             )}
@@ -393,7 +391,7 @@ export default function GastosPage() {
             <CardDescription>Dónde se fue la plata.</CardDescription>
           </CardHeader>
           <CardContent>
-            {view.byCountry.length === 0 ? <EmptyChart /> : <CategoryBarChart data={view.byCountry} />}
+            {view.byCountry.length === 0 ? <EmptyChart /> : <LazyCategoryBarChart data={view.byCountry} />}
           </CardContent>
         </Card>
 
@@ -403,7 +401,7 @@ export default function GastosPage() {
             <CardDescription>Ranking de tarjetas / cuentas.</CardDescription>
           </CardHeader>
           <CardContent>
-            {view.byAccount.length === 0 ? <EmptyChart /> : <CategoryBarChart data={view.byAccount} />}
+            {view.byAccount.length === 0 ? <EmptyChart /> : <LazyCategoryBarChart data={view.byAccount} />}
           </CardContent>
         </Card>
       </div>

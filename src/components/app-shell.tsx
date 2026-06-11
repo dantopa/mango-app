@@ -17,7 +17,16 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PushNotificationToggle } from "@/components/push-notification-toggle";
 import { PendingConfirmations } from "@/components/pending-confirmations";
+import { OfflineBanner } from "@/components/offline-banner";
 
+// Navigation links use prefetch={true} + onTouchStart for eager route prefetching.
+// Graceful degradation on prefetch failure (Requirement 10.7):
+// - When offline, prefetch silently fails (Next.js does not throw)
+// - On navigation, the App Router falls back to on-demand loading
+// - Each route's loading.tsx (Suspense boundary) shows a skeleton immediately
+// - The Service Worker serves the cached App Shell for navigation requests (sw.js)
+// - Once connectivity is restored, the route chunk loads and replaces the skeleton
+// - No error boundary intercepts this flow — skeletons are always displayed
 const NAV = [
   { href: "/", label: "Dashboard", short: "Inicio", icon: LayoutDashboard },
   { href: "/gastos", label: "Gastos", short: "Gastos", icon: Receipt },
@@ -40,7 +49,7 @@ export function AppShell({
   const pathname = usePathname();
 
   const brand = (
-    <Link href="/" className="flex items-center gap-2">
+    <Link href="/" prefetch={true} onTouchStart={() => {}} className="flex items-center gap-2 transition-transform duration-50 active:scale-95 active:opacity-80">
       <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <Sparkles className="size-4" />
       </div>
@@ -60,8 +69,10 @@ export function AppShell({
               <Link
                 key={href}
                 href={href}
+                prefetch={true}
+                onTouchStart={() => {}}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors transition-transform duration-50 active:scale-95 active:opacity-80",
                   active
                     ? "bg-secondary text-foreground"
                     : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
@@ -120,8 +131,10 @@ export function AppShell({
             <Link
               key={href}
               href={href}
+              prefetch={true}
+              onTouchStart={() => {}}
               className={cn(
-                "flex min-w-0 flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+                "flex min-w-0 flex-col items-center justify-center gap-1 min-h-11 py-2.5 text-[11px] font-medium transition-colors transition-transform duration-50 active:scale-95 active:opacity-80",
                 active ? "text-primary" : "text-muted-foreground",
               )}
             >
@@ -134,6 +147,7 @@ export function AppShell({
 
       {/* Content */}
       <main className="min-w-0 flex-1 md:pl-60">
+        <OfflineBanner />
         <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-[4.5rem] md:px-8 md:pb-16 md:pt-8">
           <PendingConfirmations />
           {children}

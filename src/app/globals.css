@@ -108,7 +108,9 @@
   [role="button"],
   [role="tab"],
   [role="switch"],
+  input,
   select,
+  textarea,
   summary {
     touch-action: manipulation;
   }

@@ -8,7 +8,7 @@ import { goalProgress, netWorthByDate, netWorthSummary } from "@/lib/analytics";
 import { formatDate, formatUsd } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { GoalTracker } from "@/components/goal-tracker";
-import { GoalFormDialog } from "@/components/goal-form-dialog";
+import { LazyGoalFormDialog } from "@/components/lazy";
 import { LoadingState, ErrorState, EmptyState } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -136,7 +136,7 @@ export default function ObjetivosPage() {
         </div>
       )}
 
-      <GoalFormDialog
+      <LazyGoalFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         goal={editing}

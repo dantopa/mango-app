@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { VirtualList } from "@/components/virtual-list";
 import { cn } from "@/lib/utils";
 import { formatDay, formatNative, formatUsd } from "@/lib/format";
 import { useUpdateTransaction } from "@/hooks/use-finance";
@@ -26,6 +27,9 @@ import { COUNTRIES, EXPENSE_TYPES, PAYMENT_TYPES, expenseTypeMeta } from "@/lib/
 import type { Category, TransactionWithRelations } from "@/lib/types";
 
 const NONE = "__none__";
+const VIRTUAL_THRESHOLD = 50;
+const MOBILE_ROW_HEIGHT = 100; // estimated height for mobile card items
+const DESKTOP_ROW_HEIGHT = 52; // estimated height for desktop table rows
 
 type EditValues = Parameters<
   ReturnType<typeof useUpdateTransaction>["mutateAsync"]
@@ -68,177 +72,360 @@ export function TransactionsTable({
     );
   }
 
+  const useVirtual = transactions.length > VIRTUAL_THRESHOLD;
+
   return (
     <>
       {/* Mobile: card list */}
-      <ul className="divide-y divide-border md:hidden">
-        {transactions.map((t) => {
-          const isCredit = t.is_payment || t.amount_usd < 0;
-          return (
-            <li key={t.id} className="flex flex-col gap-2.5 px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate font-medium">
-                    {t.merchant ?? t.description_raw}
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {formatDay(t.tx_date)} · {t.account?.name ?? "—"}
-                    {t.installments && t.installments !== "1 de 1"
-                      ? ` · ${t.installments}`
-                      : ""}
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div
-                    className={cn(
-                      "font-semibold tabular-nums",
-                      isCredit ? "text-positive" : "text-foreground",
-                    )}
-                  >
-                    {formatUsd(t.amount_usd)}
-                  </div>
-                  {t.native_currency !== "USD" && (
-                    <div className="text-xs text-muted-foreground tabular-nums">
-                      {formatNative(t.amount_native, t.native_currency)}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <CategorySelect
-                  value={t.category?.id ?? NONE}
-                  color={t.category?.color}
-                  name={t.category?.name}
+      <div className="md:hidden">
+        {useVirtual ? (
+          <div style={{ height: "70vh" }}>
+            <VirtualList
+              items={transactions}
+              estimateSize={MOBILE_ROW_HEIGHT}
+              overscan={5}
+              renderItem={(t) => (
+                <MobileTransactionRow
+                  key={t.id}
+                  t={t}
                   categories={categories}
-                  className="h-9 min-w-0 flex-1"
-                  onChange={(v) => mutate(t.id, { category_id: v === NONE ? null : v })}
+                  pendingId={pendingId}
+                  expanded={expanded}
+                  onToggleExpand={toggleExpanded}
+                  onMutate={mutate}
                 />
-                <FlagToggle
-                  active={t.is_payment}
-                  label="Pago"
-                  onClick={() => mutate(t.id, { is_payment: !t.is_payment })}
-                />
-                <ExpandToggle
-                  active={expanded.has(t.id)}
-                  onClick={() => toggleExpanded(t.id)}
-                />
-                {pendingId === t.id && (
-                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                )}
-              </div>
-              {expanded.has(t.id) && (
-                <DimensionEditor t={t} onChange={(v) => mutate(t.id, v)} />
               )}
-            </li>
-          );
-        })}
-      </ul>
+            />
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {transactions.map((t) => (
+              <li key={t.id}>
+                <MobileTransactionRow
+                  t={t}
+                  categories={categories}
+                  pendingId={pendingId}
+                  expanded={expanded}
+                  onToggleExpand={toggleExpanded}
+                  onMutate={mutate}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {/* Desktop: table */}
       <div className="hidden md:block">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>Fecha</TableHead>
-              <TableHead>Descripción</TableHead>
-              <TableHead>Cuenta</TableHead>
-              <TableHead className="w-48">Categoría</TableHead>
-              <TableHead>Flags</TableHead>
-              <TableHead className="text-right">Monto</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {transactions.map((t) => {
-              const isCredit = t.is_payment || t.amount_usd < 0;
-              const busy = pendingId === t.id;
-              return (
-                <React.Fragment key={t.id}>
-                <TableRow className={cn(busy && "opacity-60")}>
-                  <TableCell className="whitespace-nowrap text-muted-foreground tabular-nums">
-                    {formatDay(t.tx_date)}
-                  </TableCell>
-                  <TableCell className="max-w-[260px]">
-                    <div className="truncate font-medium">
-                      {t.merchant ?? t.description_raw}
-                    </div>
-                    {t.merchant && (
-                      <div className="truncate text-xs text-muted-foreground">
-                        {t.description_raw}
+        {useVirtual ? (
+          <>
+            <div className="grid grid-cols-[auto_1fr_auto_12rem_auto_auto] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+              <span className="pr-4">Fecha</span>
+              <span className="pr-4">Descripción</span>
+              <span className="pr-4">Cuenta</span>
+              <span className="pr-4">Categoría</span>
+              <span className="pr-4">Flags</span>
+              <span className="text-right">Monto</span>
+            </div>
+            <div style={{ height: "70vh" }}>
+              <VirtualList
+                items={transactions}
+                estimateSize={DESKTOP_ROW_HEIGHT}
+                overscan={5}
+                renderItem={(t) => (
+                  <DesktopTransactionRow
+                    key={t.id}
+                    t={t}
+                    categories={categories}
+                    pendingId={pendingId}
+                    expanded={expanded}
+                    onToggleExpand={toggleExpanded}
+                    onMutate={mutate}
+                  />
+                )}
+              />
+            </div>
+          </>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Fecha</TableHead>
+                <TableHead>Descripción</TableHead>
+                <TableHead>Cuenta</TableHead>
+                <TableHead className="w-48">Categoría</TableHead>
+                <TableHead>Flags</TableHead>
+                <TableHead className="text-right">Monto</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {transactions.map((t) => {
+                const isCredit = t.is_payment || t.amount_usd < 0;
+                const busy = pendingId === t.id;
+                return (
+                  <React.Fragment key={t.id}>
+                  <TableRow className={cn(busy && "opacity-60")}>
+                    <TableCell className="whitespace-nowrap text-muted-foreground tabular-nums">
+                      {formatDay(t.tx_date)}
+                    </TableCell>
+                    <TableCell className="max-w-[260px]">
+                      <div className="truncate font-medium">
+                        {t.merchant ?? t.description_raw}
                       </div>
-                    )}
-                    {t.installments && t.installments !== "1 de 1" && (
-                      <Badge variant="muted" className="mt-1">
-                        {t.installments}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {t.account?.name ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    <CategorySelect
-                      value={t.category?.id ?? NONE}
-                      color={t.category?.color}
-                      name={t.category?.name}
-                      categories={categories}
-                      className="h-8"
-                      onChange={(v) =>
-                        mutate(t.id, { category_id: v === NONE ? null : v })
-                      }
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      <Badge
-                        variant="muted"
-                        style={{ color: expenseTypeMeta.color(t.expense_type) }}
+                      {t.merchant && (
+                        <div className="truncate text-xs text-muted-foreground">
+                          {t.description_raw}
+                        </div>
+                      )}
+                      {t.installments && t.installments !== "1 de 1" && (
+                        <Badge variant="muted" className="mt-1">
+                          {t.installments}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {t.account?.name ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <CategorySelect
+                        value={t.category?.id ?? NONE}
+                        color={t.category?.color}
+                        name={t.category?.name}
+                        categories={categories}
+                        className="h-8"
+                        onChange={(v) =>
+                          mutate(t.id, { category_id: v === NONE ? null : v })
+                        }
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant="muted"
+                          style={{ color: expenseTypeMeta.color(t.expense_type) }}
+                        >
+                          {expenseTypeMeta.label(t.expense_type)}
+                        </Badge>
+                        <FlagToggle
+                          active={t.is_payment}
+                          label="Pago"
+                          onClick={() => mutate(t.id, { is_payment: !t.is_payment })}
+                        />
+                        <ExpandToggle
+                          active={expanded.has(t.id)}
+                          onClick={() => toggleExpanded(t.id)}
+                        />
+                        {busy && (
+                          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div
+                        className={cn(
+                          "font-medium tabular-nums",
+                          isCredit ? "text-positive" : "text-foreground",
+                        )}
                       >
-                        {expenseTypeMeta.label(t.expense_type)}
-                      </Badge>
-                      <FlagToggle
-                        active={t.is_payment}
-                        label="Pago"
-                        onClick={() => mutate(t.id, { is_payment: !t.is_payment })}
-                      />
-                      <ExpandToggle
-                        active={expanded.has(t.id)}
-                        onClick={() => toggleExpanded(t.id)}
-                      />
-                      {busy && (
-                        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div
-                      className={cn(
-                        "font-medium tabular-nums",
-                        isCredit ? "text-positive" : "text-foreground",
-                      )}
-                    >
-                      {formatUsd(t.amount_usd)}
-                    </div>
-                    {t.native_currency !== "USD" && (
-                      <div className="text-xs text-muted-foreground tabular-nums">
-                        {formatNative(t.amount_native, t.native_currency)}
+                        {formatUsd(t.amount_usd)}
                       </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-                {expanded.has(t.id) && (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={6} className="bg-secondary/20 py-3">
-                      <DimensionEditor t={t} onChange={(v) => mutate(t.id, v)} />
+                      {t.native_currency !== "USD" && (
+                        <div className="text-xs text-muted-foreground tabular-nums">
+                          {formatNative(t.amount_native, t.native_currency)}
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
-                )}
-                </React.Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
+                  {expanded.has(t.id) && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={6} className="bg-secondary/20 py-3">
+                        <DimensionEditor t={t} onChange={(v) => mutate(t.id, v)} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
       </div>
     </>
+  );
+}
+
+/* ─── Virtualized row components ─── */
+
+function MobileTransactionRow({
+  t,
+  categories,
+  pendingId,
+  expanded,
+  onToggleExpand,
+  onMutate,
+}: {
+  t: TransactionWithRelations;
+  categories: Category[];
+  pendingId: string | null;
+  expanded: Set<string>;
+  onToggleExpand: (id: string) => void;
+  onMutate: (id: string, values: EditValues) => void;
+}) {
+  const isCredit = t.is_payment || t.amount_usd < 0;
+  return (
+    <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium">
+            {t.merchant ?? t.description_raw}
+          </div>
+          <div className="truncate text-xs text-muted-foreground">
+            {formatDay(t.tx_date)} · {t.account?.name ?? "—"}
+            {t.installments && t.installments !== "1 de 1"
+              ? ` · ${t.installments}`
+              : ""}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div
+            className={cn(
+              "font-semibold tabular-nums",
+              isCredit ? "text-positive" : "text-foreground",
+            )}
+          >
+            {formatUsd(t.amount_usd)}
+          </div>
+          {t.native_currency !== "USD" && (
+            <div className="text-xs text-muted-foreground tabular-nums">
+              {formatNative(t.amount_native, t.native_currency)}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <CategorySelect
+          value={t.category?.id ?? NONE}
+          color={t.category?.color}
+          name={t.category?.name}
+          categories={categories}
+          className="h-9 min-w-0 flex-1"
+          onChange={(v) => onMutate(t.id, { category_id: v === NONE ? null : v })}
+        />
+        <FlagToggle
+          active={t.is_payment}
+          label="Pago"
+          onClick={() => onMutate(t.id, { is_payment: !t.is_payment })}
+        />
+        <ExpandToggle
+          active={expanded.has(t.id)}
+          onClick={() => onToggleExpand(t.id)}
+        />
+        {pendingId === t.id && (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        )}
+      </div>
+      {expanded.has(t.id) && (
+        <DimensionEditor t={t} onChange={(v) => onMutate(t.id, v)} />
+      )}
+    </div>
+  );
+}
+
+function DesktopTransactionRow({
+  t,
+  categories,
+  pendingId,
+  expanded,
+  onToggleExpand,
+  onMutate,
+}: {
+  t: TransactionWithRelations;
+  categories: Category[];
+  pendingId: string | null;
+  expanded: Set<string>;
+  onToggleExpand: (id: string) => void;
+  onMutate: (id: string, values: EditValues) => void;
+}) {
+  const isCredit = t.is_payment || t.amount_usd < 0;
+  const busy = pendingId === t.id;
+  return (
+    <div className={cn("border-b border-border", busy && "opacity-60")}>
+      <div className="grid grid-cols-[auto_1fr_auto_12rem_auto_auto] items-center px-4 py-3 text-sm">
+        <span className="whitespace-nowrap pr-4 text-muted-foreground tabular-nums">
+          {formatDay(t.tx_date)}
+        </span>
+        <div className="min-w-0 pr-4">
+          <div className="truncate font-medium">
+            {t.merchant ?? t.description_raw}
+          </div>
+          {t.merchant && (
+            <div className="truncate text-xs text-muted-foreground">
+              {t.description_raw}
+            </div>
+          )}
+          {t.installments && t.installments !== "1 de 1" && (
+            <Badge variant="muted" className="mt-1">
+              {t.installments}
+            </Badge>
+          )}
+        </div>
+        <span className="whitespace-nowrap pr-4 text-muted-foreground">
+          {t.account?.name ?? "—"}
+        </span>
+        <div className="pr-4">
+          <CategorySelect
+            value={t.category?.id ?? NONE}
+            color={t.category?.color}
+            name={t.category?.name}
+            categories={categories}
+            className="h-8"
+            onChange={(v) =>
+              onMutate(t.id, { category_id: v === NONE ? null : v })
+            }
+          />
+        </div>
+        <div className="flex items-center gap-1.5 pr-4">
+          <Badge
+            variant="muted"
+            style={{ color: expenseTypeMeta.color(t.expense_type) }}
+          >
+            {expenseTypeMeta.label(t.expense_type)}
+          </Badge>
+          <FlagToggle
+            active={t.is_payment}
+            label="Pago"
+            onClick={() => onMutate(t.id, { is_payment: !t.is_payment })}
+          />
+          <ExpandToggle
+            active={expanded.has(t.id)}
+            onClick={() => onToggleExpand(t.id)}
+          />
+          {busy && (
+            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+          )}
+        </div>
+        <div className="text-right">
+          <div
+            className={cn(
+              "font-medium tabular-nums",
+              isCredit ? "text-positive" : "text-foreground",
+            )}
+          >
+            {formatUsd(t.amount_usd)}
+          </div>
+          {t.native_currency !== "USD" && (
+            <div className="text-xs text-muted-foreground tabular-nums">
+              {formatNative(t.amount_native, t.native_currency)}
+            </div>
+          )}
+        </div>
+      </div>
+      {expanded.has(t.id) && (
+        <div className="bg-secondary/20 px-4 py-3">
+          <DimensionEditor t={t} onChange={(v) => onMutate(t.id, v)} />
+        </div>
+      )}
+    </div>
   );
 }
 

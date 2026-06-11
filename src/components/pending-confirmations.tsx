@@ -81,7 +81,7 @@ export function PendingConfirmations() {
               <Button
                 size="icon"
                 variant="ghost"
-                className="size-7 text-green-500 hover:bg-green-500/10"
+                className="text-green-500 hover:bg-green-500/10"
                 disabled={loading[item.dedup_key]}
                 onClick={() => handleAction(item.dedup_key, "approve")}
                 title="Confirmar"
@@ -91,7 +91,7 @@ export function PendingConfirmations() {
               <Button
                 size="icon"
                 variant="ghost"
-                className="size-7 text-destructive hover:bg-destructive/10"
+                className="text-destructive hover:bg-destructive/10"
                 disabled={loading[item.dedup_key]}
                 onClick={() => handleAction(item.dedup_key, "reject")}
                 title="Rechazar"

@@ -1,8 +1,21 @@
 import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 import { Providers } from "@/components/providers";
 import { PwaRegister } from "@/components/pwa-register";
+
+const geistSans = Geist({
+  subsets: ["latin", "latin-ext"],
+  display: "swap",
+  variable: "--font-geist-sans",
+});
+
+const geistMono = Geist_Mono({
+  subsets: ["latin", "latin-ext"],
+  display: "swap",
+  variable: "--font-geist-mono",
+});
 
 export const metadata: Metadata = {
   title: "Maquinita — Finanzas personales",
@@ -36,10 +49,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className="dark h-full">
+    <html
+      lang="es"
+      className={`dark h-full ${geistSans.variable} ${geistMono.variable}`}
+    >
       <body className="min-h-full antialiased font-sans">
-        <Providers>{children}</Providers>
-        <PwaRegister />
+        <PwaRegister>
+          <Providers>{children}</Providers>
+        </PwaRegister>
       </body>
     </html>
   );

@@ -36,8 +36,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { NetWorthLineChart } from "@/components/charts/net-worth-line-chart";
-import { CompositionAreaChart } from "@/components/charts/composition-area-chart";
+import { LazyNetWorthLineChart, LazyCompositionAreaChart } from "@/components/lazy";
 
 export default function DashboardPage() {
   const snapshots = useSnapshots();
@@ -115,7 +114,7 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <NetWorthLineChart data={series} />
+            <LazyNetWorthLineChart data={series} />
           </CardContent>
         </Card>
 
@@ -170,7 +169,7 @@ export default function DashboardPage() {
           <CardDescription>Cómo crece cada cuenta mes a mes (USD).</CardDescription>
         </CardHeader>
         <CardContent>
-          <CompositionAreaChart
+          <LazyCompositionAreaChart
             data={composition.data}
             accountNames={composition.accountNames}
           />
