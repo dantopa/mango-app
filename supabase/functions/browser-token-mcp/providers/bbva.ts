@@ -19,6 +19,7 @@ interface BbvaToken {
   tsec: string;
   uid: string;
   xsrf_token: string;
+  cookies?: string; // Full cookie string from the browser session
 }
 
 export const bbvaProvider: ProviderModule = {
@@ -92,7 +93,7 @@ function parseToken(token: string): BbvaToken | null {
 }
 
 function headers(s: BbvaToken): Record<string, string> {
-  return {
+  const h: Record<string, string> = {
     "tsec": s.tsec,
     "uid": s.uid,
     "x-xsrf-token": s.xsrf_token,
@@ -101,6 +102,10 @@ function headers(s: BbvaToken): Record<string, string> {
     "referer": "https://online.bbva.com.ar/fnetcore/",
     "timestamp-uid": new Date().toISOString(),
   };
+  if (s.cookies) {
+    h["Cookie"] = s.cookies;
+  }
+  return h;
 }
 
 async function bbvaFetch(url: string, s: BbvaToken, token: string): Promise<ToolResult | Response> {

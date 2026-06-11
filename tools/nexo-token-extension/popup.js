@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function extractBbvaToken() {
-    const stored = await chrome.storage.local.get(['bbva_tsec', 'bbva_uid', 'bbva_xsrf_token', 'bbva_captured_at']);
+    const stored = await chrome.storage.local.get(['bbva_tsec', 'bbva_uid', 'bbva_xsrf_token', 'bbva_cookies', 'bbva_captured_at']);
 
     if (!stored.bbva_tsec) {
       setStatus('error', '❌ Token de BBVA no capturado. Logueate en online.bbva.com.ar, navegá un poco, y volvé a intentar.');
@@ -135,6 +135,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (!stored.bbva_uid || !stored.bbva_xsrf_token) {
       setStatus('error', '❌ Faltan headers de BBVA (uid/xsrf). Navegá dentro del home banking y volvé a intentar.');
+      return null;
+    }
+
+    if (!stored.bbva_cookies) {
+      setStatus('error', '❌ Faltan cookies de BBVA. Navegá dentro del home banking y volvé a intentar.');
       return null;
     }
 
@@ -150,7 +155,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     return JSON.stringify({
       tsec: stored.bbva_tsec,
       uid: stored.bbva_uid,
-      xsrf_token: stored.bbva_xsrf_token
+      xsrf_token: stored.bbva_xsrf_token,
+      cookies: stored.bbva_cookies
     });
   }
 

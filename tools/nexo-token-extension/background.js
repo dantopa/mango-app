@@ -40,9 +40,8 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
   ['requestHeaders']
 );
 
-// BBVA: capture tsec, uid, and x-xsrf-token.
-// tsec rotates per request/response, so we capture from both sides.
-// The user should push the token immediately after navigating in BBVA.
+// BBVA: capture tsec, uid, x-xsrf-token, and cookies.
+// BBVA requires session cookies in addition to the headers.
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
     const tsecHeader = details.requestHeaders?.find(
@@ -54,11 +53,15 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
     const xsrfHeader = details.requestHeaders?.find(
       (h) => h.name.toLowerCase() === 'x-xsrf-token'
     );
+    const cookieHeader = details.requestHeaders?.find(
+      (h) => h.name.toLowerCase() === 'cookie'
+    );
 
     const updates = {};
     if (tsecHeader?.value) updates.bbva_tsec = tsecHeader.value;
     if (uidHeader?.value) updates.bbva_uid = uidHeader.value;
     if (xsrfHeader?.value) updates.bbva_xsrf_token = xsrfHeader.value;
+    if (cookieHeader?.value) updates.bbva_cookies = cookieHeader.value;
 
     if (Object.keys(updates).length > 0) {
       updates.bbva_captured_at = Date.now();
@@ -66,7 +69,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
     }
   },
   { urls: ['https://online.bbva.com.ar/*'] },
-  ['requestHeaders']
+  ['requestHeaders', 'extraHeaders']
 );
 
 // Also try to capture tsec from response headers (BBVA may rotate it there)
@@ -83,5 +86,5 @@ chrome.webRequest.onHeadersReceived.addListener(
     }
   },
   { urls: ['https://online.bbva.com.ar/*'] },
-  ['responseHeaders']
+  ['responseHeaders', 'extraHeaders']
 );
