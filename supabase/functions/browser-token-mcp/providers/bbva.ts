@@ -103,6 +103,11 @@ async function bbvaFetch(url: string, s: BbvaToken, token: string): Promise<Tool
       let d = ""; try { d = (await res.text()).substring(0, 200); } catch { /* */ }
       return err(`BBVA HTTP ${res.status}. ${redactToken(d, token)}`);
     }
+    // BBVA rotates tsec on each response — capture the new one for subsequent calls
+    const newTsec = res.headers.get("tsec");
+    if (newTsec) {
+      s.tsec = newTsec;
+    }
     return res;
   } catch (e: unknown) {
     clearTimeout(timeout);

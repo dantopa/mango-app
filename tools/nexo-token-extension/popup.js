@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function extractBbvaToken() {
-    const stored = await chrome.storage.local.get(['bbva_tsec', 'bbva_uid', 'bbva_xsrf_token']);
+    const stored = await chrome.storage.local.get(['bbva_tsec', 'bbva_uid', 'bbva_xsrf_token', 'bbva_captured_at']);
 
     if (!stored.bbva_tsec) {
       setStatus('error', '❌ Token de BBVA no capturado. Logueate en online.bbva.com.ar, navegá un poco, y volvé a intentar.');
@@ -136,6 +136,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!stored.bbva_uid || !stored.bbva_xsrf_token) {
       setStatus('error', '❌ Faltan headers de BBVA (uid/xsrf). Navegá dentro del home banking y volvé a intentar.');
       return null;
+    }
+
+    // Warn if token is older than 2 minutes (BBVA tsec rotates frequently)
+    if (stored.bbva_captured_at) {
+      const age = Date.now() - stored.bbva_captured_at;
+      if (age > 120_000) {
+        setStatus('error', `⚠️ Token capturado hace ${Math.round(age / 60000)} min. Navegá en BBVA para refrescar y volvé a intentar.`);
+        return null;
+      }
     }
 
     return JSON.stringify({
