@@ -11,6 +11,7 @@ import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
 import { resolveDuplicate } from "../sync/dedup-core";
 import type { DedupCandidate } from "../sync/dedup-core";
+import { isFinancialPackage, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
 import "./parsers"; // side-effect: registers all parsers
 
 const OWNER_USER_ID = process.env.MAQUINITA_OWNER_USER_ID ?? "49b33f55-dcf2-4370-ba9a-204b91f2551d";
@@ -21,15 +22,30 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
 
   // 1. Get parser for this package
   const parser = getParser(payload.packageName);
-  if (!parser) return { status: "no_parser", package_name: payload.packageName };
 
   // 2. Compute dedup key and check
   const dedupKey = computeDedupKey(payload);
   if (await isDuplicate(dedupKey)) return { status: "duplicate", dedup_key: dedupKey };
 
-  // 3. Parse
-  const parsed = parser(payload);
-  if (!parsed) return { status: "no_parser", package_name: payload.packageName }; // parser returned null = couldn't parse
+  // 3. Parse — try deterministic parser first, then template DB, then LLM fallback
+  let parsed = parser ? parser(payload) : null;
+
+  if (!parsed) {
+    // Try auto-learned template from DB
+    parsed = await tryTemplateParser(payload);
+  }
+
+  if (!parsed) {
+    // LLM fallback — only for known financial packages
+    if (isFinancialPackage(payload.packageName)) {
+      console.log(`[push-ingest] no parser/template for ${payload.packageName}, trying LLM fallback`);
+      parsed = await llmFallbackParser(payload);
+    }
+  }
+
+  if (!parsed) {
+    return { status: "no_parser", package_name: payload.packageName };
+  }
 
   // 4. Insert into push_ingest_log with status "processing"
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
