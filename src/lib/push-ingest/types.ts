@@ -45,7 +45,8 @@ export type PipelineResult =
   | { status: "registered"; transaction_id: string; semaphore?: SemaphoreResult }
   | { status: "fx_pending"; dedup_key: string }
   | { status: "deduped_cross_source"; kept_key: string }
-  | { status: "registration_failed"; error: string };
+  | { status: "registration_failed"; error: string }
+  | { status: "pending_confirmation"; dedup_key: string; merchant: string | null; amount: number; currency: string };
 
 /** Modos de operación */
 export type IngestMode = "log_only" | "full_pipeline";

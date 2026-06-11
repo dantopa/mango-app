@@ -29,6 +29,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
 
   // 3. Parse — try deterministic parser first, then template DB, then LLM fallback
   let parsed = parser ? parser(payload) : null;
+  let isLlmFirstTime = false;
 
   if (!parsed) {
     // Try auto-learned template from DB
@@ -40,6 +41,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     if (isFinancialPackage(payload.packageName)) {
       console.log(`[push-ingest] no parser/template for ${payload.packageName}, trying LLM fallback`);
       parsed = await llmFallbackParser(payload);
+      if (parsed) isLlmFirstTime = true; // First time for this format
     }
   }
 
@@ -50,6 +52,42 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   // 4. Insert into push_ingest_log with status "processing"
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase = getSupabaseAdmin() as any;
+
+  // If LLM detected this for the first time, hold for confirmation
+  if (isLlmFirstTime) {
+    await supabase.from("push_ingest_log").insert({
+      dedup_key: dedupKey,
+      user_id: OWNER_USER_ID,
+      package_name: payload.packageName,
+      amount_native: parsed.amount_native,
+      native_currency: parsed.native_currency,
+      merchant: parsed.merchant,
+      status: "pending_confirmation",
+      pending_data: JSON.stringify(parsed),
+    });
+
+    // Send push notification asking for confirmation
+    try {
+      const amountFormatted = `${parsed.native_currency} ${parsed.amount_native.toLocaleString("es-CO")}`;
+      await sendPushNotification(OWNER_USER_ID, {
+        title: "🆕 Nueva fuente detectada",
+        body: `${parsed.merchant ?? payload.packageName}: ${amountFormatted}. Confirmá en la app.`,
+        tag: `confirm-${dedupKey}`,
+        data: { url: "/gastos", action: "confirm_push", dedup_key: dedupKey },
+      });
+    } catch (e) {
+      console.error("[push-ingest][confirm-notify] error:", e);
+    }
+
+    return {
+      status: "pending_confirmation",
+      dedup_key: dedupKey,
+      merchant: parsed.merchant,
+      amount: parsed.amount_native,
+      currency: parsed.native_currency,
+    };
+  }
+
   await supabase.from("push_ingest_log").insert({
     dedup_key: dedupKey,
     user_id: OWNER_USER_ID,
