@@ -48,8 +48,16 @@ export const bbvaProvider: ProviderModule = {
   ],
 
   async handle(toolName, params, token): Promise<ToolResult> {
+    console.log(`[bbva] handle called: tool=${toolName}, params=${JSON.stringify(params)}`);
+    console.log(`[bbva] token length=${token.length}, first 50 chars=${token.substring(0, 50)}`);
+
     const s = parseToken(token);
-    if (!s) return err("Invalid token for 'bbva'. Push a valid token via refresh endpoint.");
+    if (!s) {
+      console.log(`[bbva] parseToken FAILED — token is not valid JSON or missing fields`);
+      return err("Invalid token for 'bbva'. Push a valid token via refresh endpoint.");
+    }
+
+    console.log(`[bbva] parseToken OK — tsec length=${s.tsec.length}, uid=${s.uid}, xsrf_token=${s.xsrf_token.substring(0, 8)}...`);
 
     switch (toolName) {
       case "bbva_get_cards":
@@ -65,15 +73,20 @@ export const bbvaProvider: ProviderModule = {
 // --- Helpers -----------------------------------------------------------------
 
 function err(msg: string): ToolResult {
+  console.log(`[bbva] ERROR: ${msg}`);
   return { content: [{ type: "text", text: `ERROR: ${msg}` }], isError: true };
 }
 
 function parseToken(token: string): BbvaToken | null {
   try {
     const parsed = JSON.parse(token) as BbvaToken;
-    if (!parsed.tsec || !parsed.uid || !parsed.xsrf_token) return null;
+    if (!parsed.tsec || !parsed.uid || !parsed.xsrf_token) {
+      console.log(`[bbva] parseToken: missing fields — tsec=${!!parsed.tsec}, uid=${!!parsed.uid}, xsrf=${!!parsed.xsrf_token}`);
+      return null;
+    }
     return parsed;
-  } catch {
+  } catch (e) {
+    console.log(`[bbva] parseToken: JSON.parse failed — ${e}`);
     return null;
   }
 }
@@ -91,27 +104,44 @@ function headers(s: BbvaToken): Record<string, string> {
 }
 
 async function bbvaFetch(url: string, s: BbvaToken, token: string): Promise<ToolResult | Response> {
+  console.log(`[bbva] fetch: ${url}`);
+  console.log(`[bbva] fetch headers: tsec length=${s.tsec.length}, uid=${s.uid}`);
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(url, { method: "GET", headers: headers(s), signal: controller.signal });
     clearTimeout(timeout);
+
+    console.log(`[bbva] response: status=${res.status}, statusText=${res.statusText}`);
+    console.log(`[bbva] response headers: ${JSON.stringify(Object.fromEntries(res.headers.entries()))}`);
+
     if (res.status === 401 || res.status === 403) {
+      const body = await res.text().catch(() => "");
+      console.log(`[bbva] AUTH FAILED (${res.status}): body=${body.substring(0, 300)}`);
       return err("Session token for 'bbva' expired. Re-login and push a new token.");
     }
     if (!res.ok) {
-      let d = ""; try { d = (await res.text()).substring(0, 200); } catch { /* */ }
+      let d = ""; try { d = (await res.text()).substring(0, 300); } catch { /* */ }
+      console.log(`[bbva] HTTP error ${res.status}: ${d}`);
       return err(`BBVA HTTP ${res.status}. ${redactToken(d, token)}`);
     }
     // BBVA rotates tsec on each response — capture the new one for subsequent calls
     const newTsec = res.headers.get("tsec");
     if (newTsec) {
+      console.log(`[bbva] tsec rotated in response — new length=${newTsec.length}`);
       s.tsec = newTsec;
+    } else {
+      console.log(`[bbva] no tsec in response headers`);
     }
     return res;
   } catch (e: unknown) {
     clearTimeout(timeout);
-    if (e instanceof DOMException && e.name === "AbortError") return err("BBVA timed out (15s).");
+    if (e instanceof DOMException && e.name === "AbortError") {
+      console.log(`[bbva] TIMEOUT after ${TIMEOUT_MS}ms`);
+      return err("BBVA timed out (15s).");
+    }
+    console.log(`[bbva] network error: ${e}`);
     return err(`Network error: ${redactToken(sanitizeError(e), token)}`);
   }
 }
@@ -129,11 +159,14 @@ async function handleGetCards(s: BbvaToken, token: string): Promise<ToolResult> 
   const ts = Date.now();
   const url = `${BASE}${CARDS_PATH}?ts=${ts}`;
 
+  console.log(`[bbva] getCards: calling ${url}`);
   const res = await bbvaFetch(url, s, token);
   if (!(res instanceof Response)) return res;
 
   const data = await res.json();
+  console.log(`[bbva] getCards: response keys=${Object.keys(data as object)}`);
   const cards = formatCards(data);
+  console.log(`[bbva] getCards: found ${cards.length} cards`);
   return { content: [{ type: "text", text: JSON.stringify(cards) }] };
 }
 
@@ -193,11 +226,17 @@ async function handleGetCardTransactions(s: BbvaToken, token: string, params: Re
   const ts = Date.now();
   const url = `${BASE}${TRANSACTIONS_PATH}/${cardId}/transactions?ts=${ts}`;
 
+  console.log(`[bbva] getCardTransactions: card_id=${cardId}, dateFrom=${dateFrom}, dateTo=${dateTo}`);
   const res = await bbvaFetch(url, s, token);
   if (!(res instanceof Response)) return res;
 
   const data = await res.json();
+  const root = data as Record<string, unknown>;
+  const rawCount = Array.isArray(root?.data) ? (root.data as unknown[]).length : 0;
+  console.log(`[bbva] getCardTransactions: raw items=${rawCount}`);
+
   const txs = formatTransactions(data, dateFrom, dateTo);
+  console.log(`[bbva] getCardTransactions: after filter=${txs.length} transactions`);
   return { content: [{ type: "text", text: JSON.stringify(txs) }] };
 }
 
