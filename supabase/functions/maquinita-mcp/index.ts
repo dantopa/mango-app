@@ -262,6 +262,87 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
     return { ok: true, transaction: data };
   },
 
+  async leer_transacciones(args) {
+    let q = supabase
+      .from("transactions")
+      .select("id, tx_date, merchant, description_raw, amount_native, native_currency, amount_usd, account_id, category:categories(name), is_payment, source, card_last4, expense_type")
+      .eq("user_id", OWNER_USER_ID)
+      .order("tx_date", { ascending: false });
+
+    if (args.month) {
+      const monthStart = `${args.month}-01`;
+      const [y, m] = args.month.split("-").map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const monthEnd = `${args.month}-${String(lastDay).padStart(2, "0")}`;
+      q = q.gte("tx_date", monthStart).lte("tx_date", monthEnd);
+    }
+    if (args.account_name) {
+      const account = await resolveAccount({ account_name: args.account_name });
+      q = q.eq("account_id", account.id);
+    }
+    if (args.limit) q = q.limit(args.limit);
+    else q = q.limit(100);
+
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    return { count: data.length, transactions: data };
+  },
+
+  async eliminar_transaccion(args) {
+    if (!args.transaction_id) throw new Error("Falta transaction_id");
+    const { data, error } = await supabase
+      .from("transactions")
+      .delete()
+      .eq("id", args.transaction_id)
+      .eq("user_id", OWNER_USER_ID)
+      .select("id, tx_date, merchant, amount_native");
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) throw new Error("No se encontró la transacción o no pertenece al dueño");
+    return { ok: true, deleted: data[0] };
+  },
+
+  async eliminar_transacciones_lote(args) {
+    if (!Array.isArray(args.ids) || args.ids.length === 0) {
+      throw new Error("ids debe ser un array no vacío de transaction IDs");
+    }
+    const { data, error } = await supabase
+      .from("transactions")
+      .delete()
+      .in("id", args.ids)
+      .eq("user_id", OWNER_USER_ID)
+      .select("id");
+    if (error) throw new Error(error.message);
+    return { ok: true, deleted_count: data.length, ids: data.map((d) => d.id) };
+  },
+
+  async actualizar_transaccion(args) {
+    if (!args.transaction_id) throw new Error("Falta transaction_id");
+    const patch: Record<string, unknown> = {};
+    if (args.merchant !== undefined) patch.merchant = args.merchant;
+    if (args.description_raw !== undefined) patch.description_raw = args.description_raw;
+    if (args.amount_native !== undefined) patch.amount_native = args.amount_native;
+    if (args.tx_date !== undefined) patch.tx_date = args.tx_date;
+    if (args.is_payment !== undefined) patch.is_payment = args.is_payment;
+    if (args.is_extraordinary !== undefined) patch.is_extraordinary = args.is_extraordinary;
+    if (args.expense_type !== undefined) patch.expense_type = args.expense_type;
+    if (args.native_currency !== undefined) patch.native_currency = args.native_currency;
+    if (args.fx_rate_to_usd !== undefined) patch.fx_rate_to_usd = args.fx_rate_to_usd;
+    if (args.amount_usd !== undefined) patch.amount_usd = args.amount_usd;
+    if (args.category_name !== undefined || args.category_id !== undefined) {
+      patch.category_id = await resolveCategory(args);
+    }
+    if (Object.keys(patch).length === 0) throw new Error("Nada que actualizar");
+    const { data, error } = await supabase
+      .from("transactions")
+      .update(patch)
+      .eq("id", args.transaction_id)
+      .eq("user_id", OWNER_USER_ID)
+      .select("id, tx_date, merchant, amount_native, amount_usd")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, transaction: data };
+  },
+
   async leer_resumen_gastos(args) {
     const { data, error } = await supabase
       .from("transactions")
@@ -472,6 +553,61 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { transaction_id: { type: "string" }, ...categoryRef },
+      required: ["transaction_id"],
+    },
+  },
+  {
+    name: "leer_transacciones",
+    description:
+      "Lista transacciones con filtros. Usalo para buscar duplicados, verificar cargas, o inspeccionar qué hay. Devuelve id, fecha, merchant, monto, moneda, cuenta, categoría, source, card_last4.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        month: { type: "string", description: "Filtrar por mes YYYY-MM (opcional)." },
+        account_name: { type: "string", description: "Filtrar por nombre de cuenta (opcional)." },
+        limit: { type: "number", description: "Máximo de resultados (default 100)." },
+      },
+    },
+  },
+  {
+    name: "eliminar_transaccion",
+    description: "Elimina una transacción por su ID. Usalo para limpiar duplicados o errores.",
+    inputSchema: {
+      type: "object",
+      properties: { transaction_id: { type: "string", description: "ID de la transacción a eliminar." } },
+      required: ["transaction_id"],
+    },
+  },
+  {
+    name: "eliminar_transacciones_lote",
+    description: "Elimina varias transacciones por sus IDs de una. Para limpiar duplicados en batch.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: { type: "array", items: { type: "string" }, description: "Array de IDs de transacciones a eliminar." },
+      },
+      required: ["ids"],
+    },
+  },
+  {
+    name: "actualizar_transaccion",
+    description: "Actualiza campos de una transacción existente (merchant, monto, fecha, categoría, tipo, etc). Solo pasa los campos que querés cambiar.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        transaction_id: { type: "string", description: "ID de la transacción." },
+        merchant: { type: "string" },
+        description_raw: { type: "string" },
+        amount_native: { type: "number" },
+        tx_date: { type: "string" },
+        is_payment: { type: "boolean" },
+        is_extraordinary: { type: "boolean" },
+        expense_type: { type: "string" },
+        native_currency: { type: "string" },
+        fx_rate_to_usd: { type: "number" },
+        amount_usd: { type: "number" },
+        ...categoryRef,
+      },
       required: ["transaction_id"],
     },
   },
