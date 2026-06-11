@@ -11,10 +11,12 @@ import { refreshHandler } from "./refresh.ts";
 import { register } from "./registry.ts";
 import { nexoProvider } from "./providers/nexo.ts";
 import { bancolombiaProvider } from "./providers/bancolombia.ts";
+import { bbvaProvider } from "./providers/bbva.ts";
 
 // --- Register provider modules -----------------------------------------------
 register(nexoProvider);
 register(bancolombiaProvider);
+register(bbvaProvider);
 
 // --- CORS headers applied to ALL responses -----------------------------------
 const CORS: Record<string, string> = {

@@ -1,5 +1,5 @@
 import type { PushPayload, PipelineResult, IngestMode } from "./types";
-import { computeDedupKey, isDuplicate, findCrossSourceDuplicate } from "./dedup";
+import { computeDedupKey, isDuplicate } from "./dedup";
 import { getParser } from "./parser-registry";
 import { resolveRate, calculateUsd } from "./fx";
 import { categorize } from "./categorizer";
@@ -9,6 +9,8 @@ import { computeSemaphore } from "./semaphore";
 import { checkAndAlert } from "./alert";
 import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
+import { resolveDuplicate } from "../sync/dedup-core";
+import type { DedupCandidate } from "../sync/dedup-core";
 import "./parsers"; // side-effect: registers all parsers
 
 const OWNER_USER_ID = process.env.MAQUINITA_OWNER_USER_ID ?? "49b33f55-dcf2-4370-ba9a-204b91f2551d";
@@ -49,31 +51,86 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     return { status: "registered", transaction_id: "transfer-skipped" };
   }
 
-  // 5.5. Cross-source dedup — check if same amount from different package within 2 min
-  const postedAt = typeof payload.timestamp === "number"
-    ? new Date(payload.timestamp)
-    : new Date();
-  const crossDup = await findCrossSourceDuplicate(parsed.amount_native, payload.packageName, postedAt);
-  if (crossDup) {
-    // Same purchase already registered from another source — keep the one with merchant
-    const keepExisting = crossDup.merchant !== null;
-    if (keepExisting) {
-      await supabase.from("push_ingest_log").update({
-        status: "deduped_cross_source",
-        related_dedup_key: crossDup.dedup_key,
-      }).eq("dedup_key", dedupKey);
-      return { status: "deduped_cross_source", kept_key: crossDup.dedup_key };
-    }
-    // This one has better info — mark the other as deduped (but don't delete its transaction)
-  }
-
-  // 6. FX conversion
+  // 6. FX conversion (moved before dedup so amount_usd is available for cross-currency matching)
   const fxResult = await resolveRate(parsed.native_currency);
   if (!fxResult.ok) {
     await supabase.from("push_ingest_log").update({ status: "fx_pending" }).eq("dedup_key", dedupKey);
     return { status: "fx_pending", dedup_key: dedupKey };
   }
   const amountUsd = calculateUsd(parsed.amount_native, fxResult.rate);
+
+  // Compute externalTs early (needed for cross-currency dedup)
+  const externalTs = typeof payload.timestamp === "number"
+    ? new Date(payload.timestamp).toISOString()
+    : typeof payload.timestamp === "string"
+      ? payload.timestamp
+      : null;
+
+  // 5.5. Cross-source dedup via unified resolveDuplicate against transactions table
+  const dedupCandidate: DedupCandidate = {
+    amount_native: parsed.amount_native,
+    native_currency: parsed.native_currency,
+    amount_usd: amountUsd,
+    merchant: parsed.merchant,
+    card_last4: parsed.card_last4 ?? null,
+    tx_date: parsed.tx_date,
+    external_ts: externalTs,
+  };
+
+  // Get transaction IDs already claimed by other push notifications (multiplicity)
+  const { data: claimedLogs } = await supabase
+    .from("push_ingest_log")
+    .select("transaction_id")
+    .not("transaction_id", "is", null)
+    .eq("user_id", OWNER_USER_ID);
+  const excludeClaimedTxIds = (claimedLogs ?? [])
+    .map((l: { transaction_id: string | null }) => l.transaction_id)
+    .filter((id: string | null): id is string => Boolean(id));
+
+  const dedupDecision = await resolveDuplicate(dedupCandidate, OWNER_USER_ID, supabase, {
+    excludeClaimedTxIds,
+  });
+
+  // Handle the 4 decision branches
+  let needsReview = false;
+  if (dedupDecision.action === "discard") {
+    await supabase.from("push_ingest_log").update({
+      status: "deduped_cross_source",
+      transaction_id: dedupDecision.matchedTxId,
+    }).eq("dedup_key", dedupKey);
+    console.log(`[push-ingest][dedup] discard: ${dedupDecision.reason}, matched=${dedupDecision.matchedTxId}`);
+    return { status: "deduped_cross_source", kept_key: dedupDecision.matchedTxId };
+  } else if (dedupDecision.action === "upgrade") {
+    // UPDATE the matched transaction in-place with the candidate's better data (Req 5.2)
+    // id remains stable — no DELETE+INSERT. description_raw included for richer context.
+    const { error: upgradeError } = await supabase
+      .from("transactions")
+      .update({
+        merchant: parsed.merchant,
+        amount_native: parsed.amount_native,
+        native_currency: parsed.native_currency,
+        amount_usd: amountUsd,
+        fx_rate_to_usd: fxResult.rate,
+        card_last4: parsed.card_last4 ?? null,
+        external_ts: externalTs,
+        description_raw: parsed.description_raw,
+        source: "push_ingest",
+      })
+      .eq("id", dedupDecision.matchedTxId);
+    if (upgradeError) {
+      console.error("[push-ingest][dedup] upgrade error:", upgradeError.message);
+    }
+    await supabase.from("push_ingest_log").update({
+      status: "upgraded_cross_source",
+      transaction_id: dedupDecision.matchedTxId,
+    }).eq("dedup_key", dedupKey);
+    console.log(`[push-ingest][dedup] upgrade: ${dedupDecision.reason}, matched=${dedupDecision.matchedTxId}`);
+    return { status: "deduped_cross_source", kept_key: dedupDecision.matchedTxId };
+  } else if (dedupDecision.action === "insert_review") {
+    needsReview = true;
+    console.log(`[push-ingest][dedup] insert_review: ${dedupDecision.reason}`);
+  }
+  // action === "insert" → continue pipeline normally
 
   // 7. Categorize (deterministic first, AI fallback)
   const catResult = await categorize(parsed.merchant, OWNER_USER_ID);
@@ -91,7 +148,9 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     }
   }
 
-  const needsReview = !catMatched || classification.type === "unknown";
+  const needsReviewCategorization = !catMatched || classification.type === "unknown";
+  // Merge: review if dedup said so OR categorization couldn't resolve
+  if (needsReviewCategorization) needsReview = true;
 
   // 8. Resolve account
   const { data: accounts } = await supabase
@@ -110,6 +169,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   }
 
   // 9. Insert transaction
+
   const { data: txData, error: txError } = await supabase
     .from("transactions")
     .insert({
@@ -128,6 +188,8 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
       source: "push_ingest",
       country: "CO", // Default for now
       expense_type: "variable",
+      card_last4: parsed.card_last4 ?? null,
+      external_ts: externalTs,
     })
     .select("id")
     .single();

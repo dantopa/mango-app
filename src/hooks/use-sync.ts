@@ -16,6 +16,7 @@ import { queryKeys } from "@/hooks/use-finance";
 const SOURCE_ENDPOINTS: Record<SyncSource | "sync_notifications", string> = {
   sync_bancolombia: "/api/sync/bancolombia",
   sync_nexo: "/api/sync/nexo",
+  sync_bbva: "/api/sync/bbva",
   sync_gmail_bancolombia: "/api/sync/gmail",
   sync_gmail_rappicard: "/api/sync/gmail",
   sync_gmail_arriendo: "/api/sync/gmail",
@@ -125,11 +126,16 @@ async function syncLegacySource(
       return;
     }
 
-    const data: { result: SyncSourceResult } = await response.json();
-    completed.push(data.result);
+    const data: { result?: SyncSourceResult; results?: SyncSourceResult[] } = await response.json();
+
+    // BBVA returns multiple results (one per card); others return a single result
+    const sourceResults = data.results ?? (data.result ? [data.result] : []);
+    for (const r of sourceResults) {
+      completed.push(r);
+    }
     setProgress((prev) => ({
       ...prev,
-      completed: [...prev.completed, data.result],
+      completed: [...prev.completed, ...sourceResults],
     }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Error de red";

@@ -1,5 +1,5 @@
 import type { CandidateTransaction, DedupDecision } from "./types";
-import { compareMerchants } from "./fuzzy-matcher";
+import { resolveDuplicate, type DedupCandidate, type DedupOpts } from "./dedup-core";
 import { getSupabaseAdmin } from "../push-ingest/supabase-admin";
 
 /**
@@ -40,24 +40,43 @@ function getDateWindow(txDate: string): { dateFrom: string; dateTo: string } {
 }
 
 /**
+ * Maps a reason from resolveDuplicate (dedup-core) to the legacy reason strings
+ * that existing sync tests expect.
+ */
+function mapCoreReasonToSyncReason(coreReason: string): string {
+  switch (coreReason) {
+    case "card_match":
+      return "duplicate_card_match";
+    case "no_merchant":
+      return "duplicate_amount_date_no_merchant";
+    case "merchant_match":
+      return "duplicate_merchant_match";
+    case "cross_currency_card_match":
+      return "duplicate_card_match";
+    case "ambiguous_merchant_match":
+      return "ambiguous_merchant_match";
+    case "same_amount_date_diff_merchant":
+      return "same_amount_date_different_merchant";
+    case "cross_currency_amount_drift":
+      return "cross_currency_amount_drift";
+    case "cross_currency_no_card":
+      return "cross_currency_no_card";
+    default:
+      return coreReason;
+  }
+}
+
+/**
  * Evalúa si una candidata es duplicado de alguna transacción existente.
  *
- * Escalera de matching (Wave 7):
+ * Thin wrapper over `resolveDuplicate` (dedup-core.ts) that:
+ * 1. Queries DB with legacy shape (mocks-compatible)
+ * 2. Builds a DedupCandidate
+ * 3. Delegates to resolveDuplicate
+ * 4. Maps the decision back to the sync DedupDecision type
+ * 5. Falls through to push_ingest_log check if core says "insert"
  *
- * | Nivel | Clave                                                       | Veredicto      |
- * |-------|-------------------------------------------------------------|----------------|
- * | 1     | card_last4 igual + monto igual + fecha ±1 día               | discard        |
- * | 2     | monto igual + fecha ±1 día + merchant match (fuzzy)         | discard        |
- * | 3     | monto igual + fecha ±1 día + merchant ambiguous             | insert_review  |
- * | 4     | monto igual + fecha ±1 día + merchant no_match y sin last4  | insert_review  |
- * | 5     | sin coincidencia                                            | insert         |
- *
- * Paso 2: push_ingest_log acotado a created_at ±1 día (no mes completo).
- *
- * Multiplicidad: when `consumptionMap` is provided, each existing transaction
- * can only be "consumed" (matched) once. If a previous candidate in the same
- * batch already consumed it, it's no longer available for dedup. When a discard
- * decision is made, the matched transaction's count in the map is incremented.
+ * Preserves the exact same exported signature for backward compatibility.
  */
 export async function evaluateCandidate(
   candidate: CandidateTransaction,
@@ -72,6 +91,7 @@ export async function evaluateCandidate(
   const { dateFrom, dateTo } = getDateWindow(candidate.tx_date);
 
   // 1. Query existing transactions: same amount_native + date ±1 day window
+  //    (legacy query shape preserved for mock compatibility)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: existingTxs, error: txError } = await (supabase as any)
     .from("transactions")
@@ -87,13 +107,13 @@ export async function evaluateCandidate(
     return { action: "insert" };
   }
 
+  // If there are existing transactions, delegate to resolveDuplicate
   if (existingTxs && existingTxs.length > 0) {
     // Filter out existing transactions that have already been fully consumed
     // by previous candidates in this batch run
     const availableTxs = consumptionMap
-      ? existingTxs.filter((tx: { id: string }) => {
+      ? (existingTxs as Array<{ id: string }>).filter((tx) => {
           const consumed = consumptionMap.get(tx.id) ?? 0;
-          // Each existing transaction can only be consumed once (1:1 matching)
           return consumed < 1;
         })
       : existingTxs;
@@ -106,82 +126,87 @@ export async function evaluateCandidate(
     if (availableTxs.length === 0) {
       return { action: "insert" };
     }
-      // Extract candidate's card_last4 (from the field if present, otherwise from description_raw)
-      const candidateLast4 =
-        candidate.card_last4 ?? extractCardLast4(candidate.description_raw);
 
-      // --- Level 1: card_last4 match ---
-      if (candidateLast4) {
-        for (const existing of availableTxs) {
-          const existingLast4 = extractCardLast4(existing.description_raw);
-          if (existingLast4 && existingLast4 === candidateLast4) {
-            // Same card + same amount + date within ±1 day → discard (regardless of merchant)
-            if (consumptionMap) {
-              consumptionMap.set(existing.id, (consumptionMap.get(existing.id) ?? 0) + 1);
-            }
-            return { action: "discard", reason: "duplicate_card_match" };
-          }
-        }
+    // Build a boolean-based consumption map for resolveDuplicate from
+    // the number-based ConsumptionMap. A tx is "consumed" if count >= 1.
+    const boolConsumptionMap: Map<string, boolean> | undefined = consumptionMap
+      ? new Map(
+          Array.from(consumptionMap.entries())
+            .filter(([, count]) => count >= 1)
+            .map(([id]) => [id, true])
+        )
+      : undefined;
+
+    // Transform fetched rows to the format resolveDuplicate expects.
+    // Since the query filters by amount_native, all rows have the same amount.
+    // We add default values for fields not in the query.
+    const prefetchedTxs = (
+      existingTxs as Array<{
+        id: string;
+        merchant: string | null;
+        amount_native: number;
+        tx_date: string;
+        description_raw: string;
+      }>
+    ).map((tx) => ({
+      id: tx.id,
+      merchant: tx.merchant,
+      amount_native: tx.amount_native,
+      native_currency: candidate.native_currency, // same currency (query filtered by amount)
+      amount_usd: null as number | null,
+      card_last4: null as string | null, // extracted from description_raw by core
+      tx_date: tx.tx_date,
+      external_ts: null as string | null, // sync doesn't have this
+      description_raw: tx.description_raw as string | null,
+    }));
+
+    // Build DedupCandidate from CandidateTransaction
+    const dedupCandidate: DedupCandidate = {
+      amount_native: candidate.amount_native,
+      native_currency: candidate.native_currency,
+      amount_usd: null, // sync doesn't have amount_usd at dedup time
+      merchant: candidate.merchant,
+      card_last4: candidate.card_last4 ?? extractCardLast4(candidate.description_raw),
+      tx_date: candidate.tx_date,
+      external_ts: null, // sync doesn't have external_ts
+    };
+
+    const opts: DedupOpts = {
+      consumptionMap: boolConsumptionMap,
+      _prefetchedTxs: prefetchedTxs,
+    };
+
+    const coreDecision = await resolveDuplicate(
+      dedupCandidate,
+      userId,
+      supabase,
+      opts
+    );
+
+    // Map core decision back to sync DedupDecision type
+    if (coreDecision.action === "discard" || coreDecision.action === "upgrade") {
+      // Sync treats upgrade as discard (upgrade is a push-pipeline concept)
+      const matchedTxId = coreDecision.matchedTxId;
+      const reason = mapCoreReasonToSyncReason(coreDecision.reason);
+
+      // Update the number-based consumptionMap to reflect what was consumed
+      if (consumptionMap && matchedTxId) {
+        consumptionMap.set(matchedTxId, (consumptionMap.get(matchedTxId) ?? 0) + 1);
       }
 
-      // --- Levels 2–4: merchant-based matching ---
-      let firstMatchId: string | null = null;
-      let matchCount = 0;
-      let ambiguousCount = 0;
-      let noMatchWithoutLast4 = 0;
+      // Also sync the bool map back → not needed since we already updated consumptionMap
 
-      // Special case: if candidate has no merchant, any amount+date match is
-      // strong evidence of duplicate (e.g., QR payments where email has no merchant
-      // but the API MCP source does). Discard immediately.
-      if (!candidate.merchant) {
-        const firstAvailable = availableTxs[0];
-        if (consumptionMap && firstAvailable) {
-          consumptionMap.set(firstAvailable.id, (consumptionMap.get(firstAvailable.id) ?? 0) + 1);
-        }
-        return { action: "discard", reason: "duplicate_amount_date_no_merchant" };
-      }
+      return { action: "discard", reason };
+    }
 
-      for (const existing of availableTxs) {
-        const comparison = compareMerchants(candidate.merchant, existing.merchant);
-
-        if (comparison === "match") {
-          if (matchCount === 0) firstMatchId = existing.id;
-          matchCount++;
-        } else if (comparison === "ambiguous") {
-          ambiguousCount++;
-        } else {
-          // no_match: check if existing has a common last4 with candidate
-          const existingLast4 = extractCardLast4(existing.description_raw);
-          const hasCommonLast4 = candidateLast4 && existingLast4 && candidateLast4 === existingLast4;
-          if (!hasCommonLast4) {
-            noMatchWithoutLast4++;
-          }
-        }
-      }
-
-      // Level 2: merchant fuzzy match → discard
-      if (matchCount > 0) {
-        if (consumptionMap && firstMatchId) {
-          consumptionMap.set(firstMatchId, (consumptionMap.get(firstMatchId) ?? 0) + 1);
-        }
-        return { action: "discard", reason: "duplicate_merchant_match" };
-      }
-
-      // Level 3: ambiguous merchant → insert_review
-      if (ambiguousCount > 0) {
-        return {
-          action: "insert_review",
-          reason: "ambiguous_merchant_match",
-        };
-      }
-
-    // Level 4: amount+date match, merchants differ, no common last4 → insert_review
-    if (noMatchWithoutLast4 > 0) {
+    if (coreDecision.action === "insert_review") {
       return {
         action: "insert_review",
-        reason: "same_amount_date_different_merchant",
+        reason: mapCoreReasonToSyncReason(coreDecision.reason),
       };
     }
+
+    // coreDecision.action === "insert" — fall through to push_ingest_log check
   }
 
   // 2. Check push_ingest_log — constrained to created_at ±1 day (not full month)

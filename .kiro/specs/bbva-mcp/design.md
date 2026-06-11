@@ -14,39 +14,169 @@ Bookmarklet (online.bbva.com.ar) ──POST /refresh──▶ Vault (provider:bb
        (una llamada por tarjeta)                                          (todo YA EXISTE)
 ```
 
-## ⚠️ API real de BBVA — A COMPLETAR EN EL DISCOVERY (Wave 0)
+## API real de BBVA — Discovery completado ✅
 
-Esta sección está **vacía a propósito**. No conocemos los endpoints internos de `online.bbva.com.ar`. El implementador la completa capturando del navegador (DevTools → Network, sesión logueada) antes de escribir el provider. Hasta entonces, los shapes de abajo son **supuestos de trabajo** que el discovery debe confirmar o corregir (Req 1.4).
+### Listar tarjetas
 
-A documentar acá tras el discovery:
-- **Listar tarjetas** — `GET <url?>` · headers de auth · response shape (id de tarjeta, last4, marca, nombre).
-- **Consumos por tarjeta** — `GET/POST <url?>` · params (card id, período/fechas) · shape del movimiento (fecha, comercio, monto ARS, moneda, cuotas, tipo).
-- **Token de sesión** — qué campos lo componen (BBVA suele usar header `tsec`, JWT bearer, cookies, `device-id`). Diferencias con Bancolombia.
-- Ejemplos request/response **sanitizados** (sin tokens ni datos personales).
+```
+GET https://online.bbva.com.ar/fnetcore/servicios/cliente/productos/tarjetas?ts={timestamp}
+```
 
-> Riesgo a evaluar en el discovery: BBVA tiene WAF/antifraude más agresivo que Bancolombia; puede requerir headers de device/fingerprint que caduquen junto con la sesión. Si el token resulta inestable (dura minutos), dejarlo documentado — afecta la UX (el usuario tendría que pushear token justo antes de syncar).
+**Headers de auth:**
+- `tsec: <token_largo_base64>` — JWT-like session token (rotable por endpoint)
+- `uid: <uuid>` — User ID persistente de la sesión
+- `x-xsrf-token: <uuid>` — CSRF token (coincide con cookie `XSRF-TOKEN`)
+- `rcp-id: 16000004|AR0017` — ID fijo de plataforma
+- `timestamp-uid: <ISO8601>` — Timestamp de la sesión (del login)
+- Cookie `XSRF-TOKEN` — mismo valor que el header `x-xsrf-token`
+- Cookies de sesión: `JSESSIONIDfnet`, `JSESSIONID`, `sessionID`
+
+**Response shape (sanitizado):**
+```json
+{
+  "statusCode": "200",
+  "statusText": "OK",
+  "result": {
+    "tarjetasCreditoVisa": [{
+      "id": "1489099930",
+      "numero": "****9253",
+      "tipoProducto": { "codigoTipoProducto": "22", "descripcion": "Visa" },
+      "modelo": "Signature",
+      "titular": true,
+      "limiteDeCompra": "8750000.00",
+      "numeroPan": "J9L1dUzLjceATLo5HlX1Els2VsbFyw3doiIGWlZSpEQ",
+      "fechaCierreProximo": "02/07/2026",
+      "fechaVencimientoProximo": "13/07/2026"
+    }],
+    "tarjetasCreditoMastercard": [{
+      "id": "189302608",
+      "numero": "****1886",
+      "tipoProducto": { "codigoTipoProducto": "4", "descripcion": "Mastercard" },
+      "modelo": "Black",
+      "titular": true,
+      "limiteDeCompra": "10000000.00",
+      "numeroPan": "ogR7vZemqO1m1HB8E6kdQ6A20KZQxyRwJsyG78bdEUw",
+      "fechaCierreProximo": "02/07/2026",
+      "fechaVencimientoProximo": "13/07/2026"
+    }]
+  }
+}
+```
+
+**Notas:**
+- La key de la tarjeta para el endpoint de consumos es `numeroPan` (hash opaco), NO el `id` numérico.
+- `numero` ya viene con `****` + last4.
+- `modelo` identifica la gama ("Signature" para Visa, "Black" para Mastercard).
+
+### Consumos por tarjeta
+
+```
+GET https://online.bbva.com.ar/fnetcore/servicios/cards/v1/cards/{numeroPan}/transactions?ts={timestamp}
+```
+
+**Params:** Solo `ts` (timestamp anti-cache). No acepta filtro por fecha — devuelve el período en curso completo.
+
+**Response shape (sanitizado):**
+```json
+{
+  "data": [
+    {
+      "id": "",
+      "transactionNumber": "",
+      "localAmount": { "amount": "17.7", "currency": "USD" },
+      "originAmount": null,
+      "concept": "BOLD SA*COYO TAC",
+      "transactionType": {
+        "id": "AUTHORIZED",
+        "name": "Authorized",
+        "internalCode": { "id": "CONS.USD", "name": "CONS.USD" }
+      },
+      "international": true,
+      "operationDate": "2026-06-09T00:00:00.000-0300",
+      "accountedDate": "2026-06-09T00:00:00.000-0300",
+      "financingType": { "id": "NON_FINANCING", "name": "Transacción no financiable" },
+      "status": { "id": "SETTLED", "name": "Transacción completada" },
+      "contract": { "id": "1886", "number": "1886" }
+    },
+    {
+      "localAmount": { "amount": "-844731.4", "currency": "ARS" },
+      "concept": "SU PAGO EN PESOS",
+      "transactionType": { "id": "CASH_INCOME", "name": "Income" },
+      "operationDate": "2026-06-01T00:00:00.000-0300"
+    },
+    {
+      "localAmount": { "amount": "38134.99", "currency": "ARS" },
+      "concept": "CLARO DEB AUT CLARO DA16900594 0",
+      "transactionType": { "id": "PURCHASE", "name": "Purchase" },
+      "operationDate": "2026-05-29T00:00:00.000-0300"
+    }
+  ]
+}
+```
+
+**Observaciones clave:**
+- `localAmount.amount` es string numérico. Negativo = pago/crédito. Positivo = consumo.
+- `localAmount.currency` indica la moneda real ("ARS" o "USD").
+- `transactionType.id` clasifica: `PURCHASE`/`AUTHORIZED` = consumo, `CASH_INCOME` = pago.
+- `international: true` marca compras internacionales (USD).
+- `operationDate` es ISO 8601 con timezone Buenos Aires (-0300).
+- `contract.number` contiene el last4 de la tarjeta.
+- `financingType.id`: `NON_FINANCING` = sin cuotas. Si hay cuotas aparece otro valor (por confirmar con compra en cuotas real — no había una en los datos capturados).
+- No hay filtro por fecha en el endpoint; el filtrado por mes se hace del lado del adapter.
+
+### Token de sesión — Composición
+
+El session token de BBVA se compone de **3 campos obligatorios**:
+
+| Campo | Origen | Descripción |
+|-------|--------|-------------|
+| `tsec` | Header de request | Token principal de sesión (JWT-like, ~1500 chars base64). **Rota entre requests** — cada response del servidor puede devolver un nuevo `tsec`. |
+| `uid` | Header/cookie `UId` | UUID del usuario, persistente durante la sesión. |
+| `xsrf_token` | Header `x-xsrf-token` / cookie `XSRF-TOKEN` | Token CSRF. |
+
+**Diferencias con Bancolombia:**
+- Bancolombia usa `bearer` + `session_tracker` + `device_id` (3 campos estables).
+- BBVA usa `tsec` que **rota** — el bookmarklet captura el último `tsec` usado. Si el servidor devuelve uno nuevo en la response, el token se invalida más rápido.
+- BBVA requiere el header `rcp-id` y `timestamp-uid` pero son fijos por sesión.
+
+**Headers fijos (no parte del token, hardcodeados en el provider):**
+- `rcp-id: 16000004|AR0017`
+- `accept: application/json`
+- `referer: https://online.bbva.com.ar/fnetcore/`
+
+**Cookies de sesión necesarias:** `XSRF-TOKEN`, `JSESSIONIDfnet`, `JSESSIONID`, `sessionID`. Sin embargo, en la práctica solo los headers `tsec` + `uid` + `x-xsrf-token` autentican las requests XHR (las cookies viajan por el dominio del navegador, no se necesitan en el provider que hace fetch directo).
+
+**Token total estimado:** ~1800 chars como JSON → bien dentro del límite de 8192 del `/refresh`.
+
+> **Riesgo WAF:** No se observó bloqueo por fingerprint/device-id en las requests capturadas. El `tsec` rotante es el riesgo principal — el usuario debería pushear el token y syncar inmediatamente después.
 
 ## Tipos (Edge Function)
 
 ```ts
-// providers/bbva.ts — token guardado en Vault como JSON (forma a confirmar en discovery)
+// providers/bbva.ts — token guardado en Vault como JSON
 interface BbvaToken {
-  bearer: string;        // o tsec, según discovery
-  device_id?: string;
-  // ...campos que revele el discovery
+  tsec: string;          // Header principal de sesión (~1500 chars base64)
+  uid: string;           // UUID del usuario (ej: "cf651f02-05be-4020-b9f7-13b592044405")
+  xsrf_token: string;    // CSRF token (ej: "94a9ad82-6922-46a4-97db-5f5e5d5877de")
 }
 
-// Salida de bbva_get_cards
-interface BbvaCard { id: string; brand: "VISA" | "MASTERCARD"; last4: string; name: string; }
+// Salida de bbva_get_cards (normalizada del response crudo)
+interface BbvaCard {
+  id: string;            // numeroPan (hash opaco, usado en URL de transactions)
+  brand: "VISA" | "MASTERCARD";
+  last4: string;         // "9253" | "1886"
+  name: string;          // "BBVA Visa" | "BBVA Mastercard"
+}
 
-// Salida de bbva_get_card_transactions (un item por consumo)
+// Salida de bbva_get_card_transactions (un item por movimiento)
 interface BbvaTx {
-  date: string;          // YYYY-MM-DD
-  merchant: string;
-  amount: number;        // ARS (o USD si compra internacional — ver currency)
-  currency: "ARS" | "USD";
-  installments?: string; // "3/12" si aplica
-  type: string;          // CONSUMO | PAGO | INTERES | IMPUESTO ...
+  date: string;          // YYYY-MM-DD (extraído de operationDate)
+  merchant: string;      // concept del response
+  amount: number;        // Valor absoluto de localAmount.amount
+  currency: "ARS" | "USD"; // localAmount.currency
+  installments?: string; // financingType info si aplica (null para NON_FINANCING)
+  type: string;          // transactionType.id: "PURCHASE" | "AUTHORIZED" | "CASH_INCOME" | etc
+  international: boolean; // true si compra en el exterior
 }
 ```
 

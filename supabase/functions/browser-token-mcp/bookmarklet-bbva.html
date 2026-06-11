@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BBVA Token Extractor — Bookmarklet</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    .container { max-width: 720px; margin: 0 auto; }
+    h1 { color: #f8fafc; margin-bottom: 0.5rem; font-size: 1.75rem; }
+    h2 { color: #94a3b8; font-size: 1.1rem; margin-bottom: 1.5rem; font-weight: 400; }
+    h3 { color: #f8fafc; margin: 2rem 0 0.75rem; font-size: 1.2rem; }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    label { display: block; color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      color: #f8fafc;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    input:focus { outline: none; border-color: #6366f1; }
+
+    .btn {
+      display: inline-block;
+      padding: 0.6rem 1.2rem;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #4f46e5; }
+
+    .bookmarklet-link {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: #059669;
+      color: #fff;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: grab;
+      transition: background 0.2s;
+    }
+    .bookmarklet-link:hover { background: #047857; }
+    .bookmarklet-link:active { cursor: grabbing; }
+
+    .steps { counter-reset: step; padding-left: 0; list-style: none; }
+    .steps li {
+      counter-increment: step;
+      margin-bottom: 1rem;
+      padding-left: 2.5rem;
+      position: relative;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1.75rem;
+      height: 1.75rem;
+      background: #6366f1;
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    code {
+      background: #0f172a;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: #a5b4fc;
+    }
+
+    .warning {
+      background: #451a03;
+      border: 1px solid #92400e;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      color: #fbbf24;
+    }
+
+    .info {
+      background: #1e1b4b;
+      border: 1px solid #4338ca;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      color: #a5b4fc;
+    }
+
+    .generated-section {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      text-align: center;
+    }
+
+    .status { margin-top: 0.5rem; font-size: 0.8rem; color: #64748b; }
+    .status.ready { color: #34d399; }
+    .status.error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔑 BBVA Token Extractor</h1>
+    <h2>Bookmarklet para enviar tokens de sesión BBVA al MCP server</h2>
+
+    <!-- Configuration -->
+    <div class="card">
+      <h3 style="margin-top:0">⚙️ Configuración</h3>
+      <p style="margin-bottom:1rem; font-size:0.9rem; color:#94a3b8;">
+        Completá estos campos para generar el bookmarklet personalizado.
+      </p>
+
+      <label for="endpoint-url">URL del endpoint de refresh</label>
+      <input
+        type="text"
+        id="endpoint-url"
+        placeholder="https://xyz.supabase.co/functions/v1/browser-token-mcp/refresh"
+        value=""
+      >
+
+      <label for="refresh-secret">Refresh Secret (BROWSER_MCP_REFRESH_SECRET)</label>
+      <input
+        type="password"
+        id="refresh-secret"
+        placeholder="tu-refresh-secret-aquí"
+        value=""
+      >
+
+      <button class="btn" onclick="generateBookmarklet()">Generar Bookmarklet</button>
+
+      <div id="bookmarklet-output" class="generated-section" style="display:none;">
+        <p style="margin-bottom:0.75rem; color:#94a3b8; font-size:0.85rem;">
+          Arrastrá este enlace a tu barra de favoritos:
+        </p>
+        <a id="bookmarklet-anchor" class="bookmarklet-link" href="#">
+          📤 Enviar Token BBVA
+        </a>
+        <div id="gen-status" class="status ready">✓ Bookmarklet generado correctamente</div>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="card">
+      <h3 style="margin-top:0">📋 Instrucciones de uso</h3>
+
+      <ol class="steps">
+        <li>
+          <strong>Configurá los campos de arriba</strong> con la URL de tu Edge Function
+          y el refresh secret que configuraste en las variables de entorno de Supabase.
+        </li>
+        <li>
+          <strong>Hacé clic en "Generar Bookmarklet"</strong> para crear el enlace personalizado.
+        </li>
+        <li>
+          <strong>Arrastrá el botón verde</strong> (<em>"📤 Enviar Token BBVA"</em>) a tu barra de favoritos/marcadores.
+        </li>
+        <li>
+          <strong>Logueate en <a href="https://online.bbva.com.ar" style="color:#a5b4fc">online.bbva.com.ar</a></strong>
+          normalmente con tu usuario y contraseña.
+        </li>
+        <li>
+          <strong>Abrí DevTools</strong> (F12 o Cmd+Opt+I) y andá a la pestaña <strong>Network</strong>.
+          Hacé cualquier navegación dentro del home banking y buscá el header <code>tsec</code>
+          en cualquiera de las requests XHR. Copiá ese valor.
+        </li>
+        <li>
+          <strong>Hacé clic en el bookmarklet</strong> desde la barra de favoritos mientras
+          estás en online.bbva.com.ar. El script va a extraer las cookies <code>UId</code> y
+          <code>XSRF-TOKEN</code> automáticamente. Para el <code>tsec</code>, primero
+          intentará leerlo del sessionStorage; si no lo encuentra, te va a pedir que lo
+          pegues desde DevTools.
+        </li>
+        <li>
+          <strong>Confirmá el resultado:</strong> vas a ver una alerta indicando si el token
+          se envió correctamente o si hubo un error.
+        </li>
+      </ol>
+
+      <div class="info">
+        💡 <strong>Tip para encontrar el tsec:</strong> En DevTools → Network, filtrá por
+        XHR/Fetch. Hacé clic en cualquier request a <code>apis.bbva.com</code> y buscá
+        el header <code>tsec</code> en "Request Headers". Es un string largo alfanumérico.
+      </div>
+
+      <div class="warning">
+        ⚠️ <strong>Importante:</strong> El bookmarklet solo funciona cuando estás logueado
+        en <code>online.bbva.com.ar</code>. Si la sesión expiró, volvé a loguearte
+        antes de ejecutarlo. El token se envía cifrado y se almacena en Supabase Vault.
+      </div>
+    </div>
+
+    <!-- How it works -->
+    <div class="card">
+      <h3 style="margin-top:0">🔍 ¿Qué hace el bookmarklet?</h3>
+      <ol class="steps">
+        <li>Verifica que estés en <code>online.bbva.com.ar</code>.</li>
+        <li>Lee la cookie <code>UId</code> para obtener el identificador de usuario.</li>
+        <li>Lee la cookie <code>XSRF-TOKEN</code> para el token anti-CSRF.</li>
+        <li>Busca el valor <code>tsec</code> en sessionStorage (claves que contengan "tsec"). Si no lo encuentra, te pide que lo pegues manualmente.</li>
+        <li>Construye un objeto JSON con los 3 valores: <code>{tsec, uid, xsrf_token}</code>.</li>
+        <li>Envía un POST al endpoint de refresh con el header <code>Authorization: Bearer TU_SECRET</code>.</li>
+        <li>Muestra una alerta con el resultado (éxito o error).</li>
+      </ol>
+    </div>
+
+    <!-- Troubleshooting -->
+    <div class="card">
+      <h3 style="margin-top:0">🛠️ Solución de problemas</h3>
+      <ul style="padding-left:1.2rem; font-size:0.9rem;">
+        <li style="margin-bottom:0.5rem;"><strong>"No estás en online.bbva.com.ar"</strong> → Asegurate de ejecutar el bookmarklet desde la pestaña donde tenés abierto el home banking de BBVA.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"No se encontró la cookie UId"</strong> → No estás logueado en BBVA o la sesión expiró. Volvé a loguearte.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"No se encontró XSRF-TOKEN"</strong> → La sesión puede haber expirado. Refrescá la página del home banking.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"Se necesita el valor tsec"</strong> → El bookmarklet no pudo encontrar el tsec automáticamente. Seguí las instrucciones para copiarlo desde DevTools → Network.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"Error 401"</strong> → El refresh secret es incorrecto. Revisá la configuración.</li>
+        <li style="margin-bottom:0.5rem;"><strong>"Error de red"</strong> → Verificá la URL del endpoint y que la Edge Function esté deployeada.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    function generateBookmarklet() {
+      const url = document.getElementById('endpoint-url').value.trim();
+      const secret = document.getElementById('refresh-secret').value.trim();
+
+      if (!url) {
+        alert('⚠️ Ingresá la URL del endpoint de refresh');
+        return;
+      }
+      if (!secret) {
+        alert('⚠️ Ingresá el refresh secret');
+        return;
+      }
+
+      // Build the bookmarklet JavaScript code
+      const bookmarkletCode = buildBookmarkletCode(url, secret);
+
+      // Set the href on the anchor
+      const anchor = document.getElementById('bookmarklet-anchor');
+      anchor.href = bookmarkletCode;
+
+      // Show the output section
+      document.getElementById('bookmarklet-output').style.display = 'block';
+    }
+
+    function buildBookmarkletCode(refreshUrl, refreshSecret) {
+      const code = `
+(function() {
+  try {
+    if (location.hostname !== 'online.bbva.com.ar') {
+      alert('❌ Error: No estás en online.bbva.com.ar. Ejecutá el bookmarklet desde el home banking de BBVA.');
+      return;
+    }
+
+    var cookies = document.cookie;
+    function getCookie(name) {
+      var match = cookies.match(new RegExp('(?:^|;\\\\s*)' + name + '=([^;]*)'));
+      return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    var uid = getCookie('UId');
+    var xsrf_token = getCookie('XSRF-TOKEN');
+
+    if (!uid) { alert('❌ Error: No se encontró la cookie UId. ¿Estás logueado en online.bbva.com.ar?'); return; }
+    if (!xsrf_token) { alert('❌ Error: No se encontró la cookie XSRF-TOKEN. Probá refrescar la página.'); return; }
+
+    var tsec = null;
+
+    try {
+      for (var i = 0; i < sessionStorage.length; i++) {
+        var key = sessionStorage.key(i);
+        if (key && key.toLowerCase().indexOf('tsec') !== -1) {
+          tsec = sessionStorage.getItem(key);
+          break;
+        }
+      }
+      if (!tsec) {
+        for (var j = 0; j < localStorage.length; j++) {
+          var lkey = localStorage.key(j);
+          if (lkey && lkey.toLowerCase().indexOf('tsec') !== -1) {
+            tsec = localStorage.getItem(lkey);
+            break;
+          }
+        }
+      }
+    } catch(e) {}
+
+    if (!tsec) {
+      tsec = prompt('No se pudo extraer el tsec automáticamente.\\n\\nPegá el valor del header \\\"tsec\\\" de la última request en DevTools → Network → cualquier XHR → Request Headers:');
+    }
+
+    if (!tsec || tsec.trim() === '') {
+      alert('❌ Se necesita el valor tsec para continuar. Sin él no se puede autenticar contra la API de BBVA.');
+      return;
+    }
+
+    tsec = tsec.trim();
+
+    var missing = [];
+    if (!uid) missing.push('UId (cookie)');
+    if (!xsrf_token) missing.push('XSRF-TOKEN (cookie)');
+    if (!tsec) missing.push('tsec (header)');
+
+    if (missing.length > 0) {
+      alert('❌ Faltan los siguientes campos:\\n\\n' + missing.join('\\n') + '\\n\\nAsegurate de estar logueado en BBVA.');
+      return;
+    }
+
+    var token = JSON.stringify({
+      tsec: tsec,
+      uid: uid,
+      xsrf_token: xsrf_token
+    });
+
+    var body = JSON.stringify({
+      provider: 'bbva',
+      token: token
+    });
+
+    fetch('${refreshUrl}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${refreshSecret}'
+      },
+      body: body
+    })
+    .then(function(res) {
+      if (res.ok) {
+        return res.json().then(function(data) {
+          alert('✅ Token BBVA enviado correctamente!\\n\\nProvider: ' + data.provider + '\\nActualizado: ' + data.updated_at);
+        });
+      } else {
+        return res.text().then(function(text) {
+          alert('❌ Error del servidor (' + res.status + '):\\n' + text);
+        });
+      }
+    })
+    .catch(function(err) {
+      alert('❌ Error de red:\\n' + err.message);
+    });
+  } catch(e) {
+    alert('❌ Error inesperado:\\n' + e.message);
+  }
+})();
+      `.trim();
+
+      const minified = code
+        .replace(/\n\s*/g, ' ')
+        .replace(/\s{2,}/g, ' ');
+
+      return 'javascript:' + encodeURIComponent(minified);
+    }
+  </script>
+</body>
+</html>

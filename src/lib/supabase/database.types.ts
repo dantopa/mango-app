@@ -417,11 +417,13 @@ export type Database = {
           account_id: string
           amount_native: number
           amount_usd: number
+          card_last4: string | null
           category_id: string | null
           country: string
           created_at: string
           description_raw: string
           expense_type: string
+          external_ts: string | null
           fx_rate_to_usd: number
           id: string
           installments: string | null
@@ -440,11 +442,13 @@ export type Database = {
           account_id: string
           amount_native: number
           amount_usd: number
+          card_last4?: string | null
           category_id?: string | null
           country?: string
           created_at?: string
           description_raw: string
           expense_type?: string
+          external_ts?: string | null
           fx_rate_to_usd: number
           id?: string
           installments?: string | null
@@ -463,11 +467,13 @@ export type Database = {
           account_id?: string
           amount_native?: number
           amount_usd?: number
+          card_last4?: string | null
           category_id?: string | null
           country?: string
           created_at?: string
           description_raw?: string
           expense_type?: string
+          external_ts?: string | null
           fx_rate_to_usd?: number
           id?: string
           installments?: string | null

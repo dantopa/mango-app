@@ -157,8 +157,10 @@ export async function processCandidates(
           is_payment: isPayment,
           needs_review: needsReview,
           source: candidate.source,
-          country: "CO",
+          country: candidate.country ?? "CO",
           expense_type: candidate.expense_type ?? "variable",
+          card_last4: candidate.card_last4 ?? null,
+          external_ts: null,
         });
 
       if (insertError) {

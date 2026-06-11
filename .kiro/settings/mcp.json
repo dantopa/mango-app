@@ -10,7 +10,8 @@
         "get_logs",
         "deploy_edge_function",
         "apply_migration",
-        "generate_typescript_types"
+        "generate_typescript_types",
+        "list_tables"
       ]
     },
     "google-workspace": {

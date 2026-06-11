@@ -31,6 +31,7 @@ interface SyncDialogProps {
 const SOURCES: { id: ClientSyncSource; label: string }[] = [
   { id: "sync_bancolombia", label: "Bancolombia" },
   { id: "sync_nexo", label: "Nexo Card" },
+  { id: "sync_bbva", label: "BBVA" },
   { id: "sync_gmail", label: "Gmail" },
   { id: "sync_notifications", label: "Notificaciones (NFC/push)" },
 ];
@@ -192,8 +193,8 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
                 </span>
               </div>
             )}
-            {progress.completed.map((r) => (
-              <SourceResult key={r.source} result={r} />
+            {progress.completed.map((r, i) => (
+              <SourceResult key={`${r.source}-${i}`} result={r} />
             ))}
             {progress.errors.map((e) => (
               <div key={e.source} className="flex items-center gap-2 text-sm text-destructive">
@@ -212,8 +213,8 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
         {progress.status === "done" && (
           <div className="flex flex-col gap-4 pt-2">
             {/* Per-source results */}
-            {progress.completed.map((r) => (
-              <SourceResult key={r.source} result={r} />
+            {progress.completed.map((r, i) => (
+              <SourceResult key={`${r.source}-${i}`} result={r} />
             ))}
             {progress.errors.map((e) => (
               <div key={e.source} className="flex items-center gap-2 text-sm text-destructive">

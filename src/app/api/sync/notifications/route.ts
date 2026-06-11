@@ -41,6 +41,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     "com.bbva.nxt_argentina",
     "com.grability.rappi",
     "com.nexowallet",
+    "com.google.android.apps.messaging",   // SMS (Google Messages)
+    "com.samsung.android.messaging",       // SMS (Samsung Messages)
+    "com.android.mms",                     // SMS (AOSP)
   ];
 
   const { data: rawLogs, error: fetchError } = await admin

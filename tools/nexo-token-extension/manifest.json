@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Nexo Token Pusher",
-  "version": "1.0.0",
-  "description": "Extrae cookies de sesión de Nexo y las envía al MCP server",
+  "version": "1.1.0",
+  "description": "Extrae cookies de sesión de Nexo/Bancolombia/BBVA y las envía al MCP server",
   "permissions": ["cookies", "storage", "webRequest"],
-  "host_permissions": ["https://platform.nexo.com/*", "https://canalpersonas-ext.apps.bancolombia.com/*", "https://svpersonas.apps.bancolombia.com/*"],
+  "host_permissions": ["https://platform.nexo.com/*", "https://canalpersonas-ext.apps.bancolombia.com/*", "https://svpersonas.apps.bancolombia.com/*", "https://online.bbva.com.ar/*"],
   "background": {
     "service_worker": "background.js"
   },

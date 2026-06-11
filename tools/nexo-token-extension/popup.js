@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const status = document.getElementById('status');
   const pushNexo = document.getElementById('push-nexo');
   const pushBancolombia = document.getElementById('push-bancolombia');
+  const pushBbva = document.getElementById('push-bbva');
   const saveBtn = document.getElementById('save-btn');
   const urlInput = document.getElementById('url');
   const secretInput = document.getElementById('secret');
@@ -30,10 +31,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   pushNexo.addEventListener('click', () => pushToken('nexo'));
   pushBancolombia.addEventListener('click', () => pushToken('bancolombia'));
+  pushBbva.addEventListener('click', () => pushToken('bbva'));
 
   async function pushToken(provider) {
     pushNexo.disabled = true;
     pushBancolombia.disabled = true;
+    pushBbva.disabled = true;
 
     try {
       const config = await chrome.storage.local.get(['refreshUrl', 'refreshSecret']);
@@ -49,6 +52,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         token = await extractNexoToken();
       } else if (provider === 'bancolombia') {
         token = await extractBancolombiaToken();
+      } else if (provider === 'bbva') {
+        token = await extractBbvaToken();
       }
 
       if (!token) return; // error already shown
@@ -78,6 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     pushNexo.disabled = false;
     pushBancolombia.disabled = false;
+    pushBbva.disabled = false;
   }
 
   async function extractNexoToken() {
@@ -116,6 +122,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       session_tracker: stored.bancolombia_session_tracker || crypto.randomUUID(),
       device_id: stored.bancolombia_device_id || crypto.randomUUID(),
       ip: stored.bancolombia_ip || ""
+    });
+  }
+
+  async function extractBbvaToken() {
+    const stored = await chrome.storage.local.get(['bbva_tsec', 'bbva_uid', 'bbva_xsrf_token']);
+
+    if (!stored.bbva_tsec) {
+      setStatus('error', '❌ Token de BBVA no capturado. Logueate en online.bbva.com.ar, navegá un poco, y volvé a intentar.');
+      return null;
+    }
+
+    if (!stored.bbva_uid || !stored.bbva_xsrf_token) {
+      setStatus('error', '❌ Faltan headers de BBVA (uid/xsrf). Navegá dentro del home banking y volvé a intentar.');
+      return null;
+    }
+
+    return JSON.stringify({
+      tsec: stored.bbva_tsec,
+      uid: stored.bbva_uid,
+      xsrf_token: stored.bbva_xsrf_token
     });
   }
 

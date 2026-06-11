@@ -1,21 +1,23 @@
 /** Transacción candidata normalizada de cualquier fuente */
 export interface CandidateTransaction {
   amount_native: number;
-  native_currency: string; // "COP" | "USD"
+  native_currency: string; // "COP" | "USD" | "ARS"
   fx_rate_to_usd?: number; // pre-filled for USD sources
   amount_usd?: number; // pre-filled for USD sources
   merchant: string | null;
   tx_date: string; // YYYY-MM-DD
   description_raw: string;
-  account_name: string; // "Bancolombia" | "Nexo Card"
+  account_name: string; // "Bancolombia" | "Nexo Card" | "BBVA Visa" | "BBVA Mastercard"
   source: SyncSource;
   expense_type?: "fixed" | "variable"; // defaults to "variable" if not set
   card_last4?: string | null; // últimos 4 dígitos de la tarjeta (*5685, ••5685) — clave fuerte de dedup
+  country?: string; // ISO 3166-1 alpha-2 (defaults to "CO" if not set)
 }
 
 export type SyncSource =
   | "sync_bancolombia"
   | "sync_nexo"
+  | "sync_bbva"
   | "sync_gmail_bancolombia"
   | "sync_gmail_rappicard"
   | "sync_gmail_arriendo"
