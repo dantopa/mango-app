@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PushNotificationToggle } from "@/components/push-notification-toggle";
+import { PendingConfirmations } from "@/components/pending-confirmations";
 
 const NAV = [
   { href: "/", label: "Dashboard", short: "Inicio", icon: LayoutDashboard },
@@ -134,6 +135,7 @@ export function AppShell({
       {/* Content */}
       <main className="min-w-0 flex-1 md:pl-60">
         <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-[4.5rem] md:px-8 md:pb-16 md:pt-8">
+          <PendingConfirmations />
           {children}
         </div>
       </main>
