@@ -7,7 +7,7 @@ import { categorizeWithAi } from "@/lib/push-ingest/ai-categorizer";
 import { classifyTransaction } from "@/lib/push-ingest/classifier";
 import type { ParsedTransaction } from "@/lib/push-ingest/types";
 
-const OWNER_USER_ID = process.env.MAQUINITA_OWNER_USER_ID ?? "e99371b1-6163-4216-b624-c79d8ee01520";
+const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * POST /api/push-ingest/confirm

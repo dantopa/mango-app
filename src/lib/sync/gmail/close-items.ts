@@ -1,8 +1,6 @@
 import { getSupabaseAdmin } from "../../push-ingest/supabase-admin";
 
-const OWNER_USER_ID =
-  process.env.MAQUINITA_OWNER_USER_ID ??
-  "e99371b1-6163-4216-b624-c79d8ee01520";
+const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * Mark the monthly close item for a gmail sub-source as "cargado".

@@ -6,9 +6,7 @@ import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 
-const OWNER_USER_ID =
-  process.env.MAQUINITA_OWNER_USER_ID ??
-  "e99371b1-6163-4216-b624-c79d8ee01520";
+const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {

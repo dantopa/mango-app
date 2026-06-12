@@ -1,7 +1,7 @@
 import type { ParsedTransaction, PushPayload } from "../types";
 import { getSupabaseAdmin } from "../supabase-admin";
 
-const OWNER_USER_ID = process.env.MAQUINITA_OWNER_USER_ID ?? "e99371b1-6163-4216-b624-c79d8ee01520";
+const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * Whitelist of package names that may contain financial notifications.
