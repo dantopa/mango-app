@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, SlidersHorizontal } from "lucide-react";
+import { ArrowUpDown, Loader2, SlidersHorizontal, Trash2 } from "lucide-react";
 
 import {
   Table,
@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { VirtualList } from "@/components/virtual-list";
 import { cn } from "@/lib/utils";
 import { formatDay, formatNative, formatUsd } from "@/lib/format";
-import { useUpdateTransaction } from "@/hooks/use-finance";
+import { useUpdateTransaction, useDeleteTransaction } from "@/hooks/use-finance";
 import { COUNTRIES, EXPENSE_TYPES, PAYMENT_TYPES, expenseTypeMeta } from "@/lib/dimensions";
 import type { Category, TransactionWithRelations } from "@/lib/types";
 
@@ -30,6 +30,30 @@ const NONE = "__none__";
 const VIRTUAL_THRESHOLD = 50;
 const MOBILE_ROW_HEIGHT = 100; // estimated height for mobile card items
 const DESKTOP_ROW_HEIGHT = 52; // estimated height for desktop table rows
+
+type SortKey = "created_at" | "tx_date" | "amount_usd";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "created_at", label: "Más recientes" },
+  { value: "tx_date", label: "Fecha de compra" },
+  { value: "amount_usd", label: "Monto" },
+];
+
+function sortTransactions(
+  transactions: TransactionWithRelations[],
+  sortKey: SortKey,
+): TransactionWithRelations[] {
+  return [...transactions].sort((a, b) => {
+    switch (sortKey) {
+      case "created_at":
+        return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+      case "tx_date":
+        return b.tx_date.localeCompare(a.tx_date);
+      case "amount_usd":
+        return b.amount_usd - a.amount_usd;
+    }
+  });
+}
 
 type EditValues = Parameters<
   ReturnType<typeof useUpdateTransaction>["mutateAsync"]
@@ -43,8 +67,15 @@ export function TransactionsTable({
   categories: Category[];
 }) {
   const update = useUpdateTransaction();
+  const deleteTx = useDeleteTransaction();
   const [pendingId, setPendingId] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const [sortKey, setSortKey] = React.useState<SortKey>("created_at");
+
+  const sorted = React.useMemo(
+    () => sortTransactions(transactions, sortKey),
+    [transactions, sortKey],
+  );
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -64,6 +95,21 @@ export function TransactionsTable({
     }
   }
 
+  async function handleDelete(id: string) {
+    if (!window.confirm("¿Eliminar esta transacción? Esta acción no se puede deshacer.")) return;
+    setPendingId(id);
+    try {
+      await deleteTx.mutateAsync(id);
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   if (transactions.length === 0) {
     return (
       <div className="p-10 text-center text-sm text-muted-foreground">
@@ -72,16 +118,33 @@ export function TransactionsTable({
     );
   }
 
-  const useVirtual = transactions.length > VIRTUAL_THRESHOLD;
+  const useVirtual = sorted.length > VIRTUAL_THRESHOLD;
 
   return (
     <>
+      {/* Sort selector */}
+      <div className="flex items-center gap-2 px-4 pb-3">
+        <ArrowUpDown className="size-4 text-muted-foreground" />
+        <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
+          <SelectTrigger className="h-8 w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Mobile: card list */}
       <div className="md:hidden">
         {useVirtual ? (
           <div style={{ height: "70vh" }}>
             <VirtualList
-              items={transactions}
+              items={sorted}
               estimateSize={MOBILE_ROW_HEIGHT}
               overscan={5}
               renderItem={(t) => (
@@ -93,13 +156,14 @@ export function TransactionsTable({
                   expanded={expanded}
                   onToggleExpand={toggleExpanded}
                   onMutate={mutate}
+                  onDelete={handleDelete}
                 />
               )}
             />
           </div>
         ) : (
           <ul className="divide-y divide-border">
-            {transactions.map((t) => (
+            {sorted.map((t) => (
               <li key={t.id}>
                 <MobileTransactionRow
                   t={t}
@@ -108,6 +172,7 @@ export function TransactionsTable({
                   expanded={expanded}
                   onToggleExpand={toggleExpanded}
                   onMutate={mutate}
+                  onDelete={handleDelete}
                 />
               </li>
             ))}
@@ -129,7 +194,7 @@ export function TransactionsTable({
             </div>
             <div style={{ height: "70vh" }}>
               <VirtualList
-                items={transactions}
+                items={sorted}
                 estimateSize={DESKTOP_ROW_HEIGHT}
                 overscan={5}
                 renderItem={(t) => (
@@ -141,6 +206,7 @@ export function TransactionsTable({
                     expanded={expanded}
                     onToggleExpand={toggleExpanded}
                     onMutate={mutate}
+                    onDelete={handleDelete}
                   />
                 )}
               />
@@ -159,7 +225,7 @@ export function TransactionsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transactions.map((t) => {
+              {sorted.map((t) => {
                 const isCredit = t.is_payment || t.amount_usd < 0;
                 const busy = pendingId === t.id;
                 return (
@@ -239,7 +305,7 @@ export function TransactionsTable({
                   {expanded.has(t.id) && (
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={6} className="bg-secondary/20 py-3">
-                        <DimensionEditor t={t} onChange={(v) => mutate(t.id, v)} />
+                        <DimensionEditor t={t} onChange={(v) => mutate(t.id, v)} onDelete={() => handleDelete(t.id)} />
                       </TableCell>
                     </TableRow>
                   )}
@@ -263,6 +329,7 @@ function MobileTransactionRow({
   expanded,
   onToggleExpand,
   onMutate,
+  onDelete,
 }: {
   t: TransactionWithRelations;
   categories: Category[];
@@ -270,6 +337,7 @@ function MobileTransactionRow({
   expanded: Set<string>;
   onToggleExpand: (id: string) => void;
   onMutate: (id: string, values: EditValues) => void;
+  onDelete: (id: string) => void;
 }) {
   const isCredit = t.is_payment || t.amount_usd < 0;
   return (
@@ -325,7 +393,7 @@ function MobileTransactionRow({
         )}
       </div>
       {expanded.has(t.id) && (
-        <DimensionEditor t={t} onChange={(v) => onMutate(t.id, v)} />
+        <DimensionEditor t={t} onChange={(v) => onMutate(t.id, v)} onDelete={() => onDelete(t.id)} />
       )}
     </div>
   );
@@ -338,6 +406,7 @@ function DesktopTransactionRow({
   expanded,
   onToggleExpand,
   onMutate,
+  onDelete,
 }: {
   t: TransactionWithRelations;
   categories: Category[];
@@ -345,6 +414,7 @@ function DesktopTransactionRow({
   expanded: Set<string>;
   onToggleExpand: (id: string) => void;
   onMutate: (id: string, values: EditValues) => void;
+  onDelete: (id: string) => void;
 }) {
   const isCredit = t.is_payment || t.amount_usd < 0;
   const busy = pendingId === t.id;
@@ -422,7 +492,7 @@ function DesktopTransactionRow({
       </div>
       {expanded.has(t.id) && (
         <div className="bg-secondary/20 px-4 py-3">
-          <DimensionEditor t={t} onChange={(v) => onMutate(t.id, v)} />
+          <DimensionEditor t={t} onChange={(v) => onMutate(t.id, v)} onDelete={() => onDelete(t.id)} />
         </div>
       )}
     </div>
@@ -529,12 +599,14 @@ function EnumSelect({
 function DimensionEditor({
   t,
   onChange,
+  onDelete,
 }: {
   t: TransactionWithRelations;
   onChange: (values: EditValues) => void;
+  onDelete: () => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-3 px-4 sm:grid-cols-3 sm:px-0">
+    <div className="grid grid-cols-1 gap-3 px-4 sm:grid-cols-4 sm:px-0">
       <EnumSelect
         label="Tipo de gasto"
         value={t.expense_type}
@@ -555,6 +627,17 @@ function DimensionEditor({
         options={PAYMENT_TYPES}
         onChange={(v) => onChange({ payment_type: v } as EditValues)}
       />
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">Acciones</span>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-destructive/30 px-3 text-sm text-destructive transition-colors hover:bg-destructive/10"
+        >
+          <Trash2 className="size-3.5" />
+          Eliminar
+        </button>
+      </div>
     </div>
   );
 }
