@@ -28,44 +28,56 @@ export function usePushNotifications() {
   // Check current state on mount
   useEffect(() => {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      console.log("[push-debug] unsupported: SW=", "serviceWorker" in navigator, "PushManager=", "PushManager" in window);
       setPermission("unsupported");
       return;
     }
 
-    setPermission(Notification.permission as PushPermissionState);
+    const perm = Notification.permission as PushPermissionState;
+    console.log("[push-debug] Notification.permission =", perm);
+    setPermission(perm);
 
     // Check if already subscribed
     navigator.serviceWorker.ready.then((reg) => {
+      console.log("[push-debug] SW ready, checking getSubscription...");
       reg.pushManager.getSubscription().then((sub) => {
+        console.log("[push-debug] getSubscription result:", sub ? sub.endpoint : "null (not subscribed)");
         setIsSubscribed(sub !== null);
+      }).catch((err) => {
+        console.error("[push-debug] getSubscription error:", err);
       });
     });
   }, []);
 
   const subscribe = useCallback(async () => {
     if (!VAPID_PUBLIC_KEY) {
-      console.warn("[push] VAPID public key not configured");
+      console.warn("[push-debug] VAPID public key not configured");
       return false;
     }
 
+    console.log("[push-debug] subscribe() called, VAPID key length:", VAPID_PUBLIC_KEY.length);
     setIsLoading(true);
     try {
       // Request permission
       const result = await Notification.requestPermission();
+      console.log("[push-debug] requestPermission result:", result);
       setPermission(result as PushPermissionState);
 
       if (result !== "granted") {
+        console.log("[push-debug] permission not granted, aborting");
         return false;
       }
 
       // Get SW registration
       const registration = await navigator.serviceWorker.ready;
+      console.log("[push-debug] SW ready for subscribe, scope:", registration.scope);
 
       // Subscribe to push
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
       });
+      console.log("[push-debug] pushManager.subscribe OK, endpoint:", subscription.endpoint);
 
       // Send subscription to backend
       const response = await fetch("/api/push-subscribe", {
@@ -80,6 +92,7 @@ export function usePushNotifications() {
         }),
       });
 
+      console.log("[push-debug] /api/push-subscribe response:", response.status);
       if (response.ok) {
         setIsSubscribed(true);
         return true;
@@ -87,7 +100,7 @@ export function usePushNotifications() {
 
       return false;
     } catch (err) {
-      console.error("[push] subscription failed:", err);
+      console.error("[push-debug] subscription failed:", err);
       return false;
     } finally {
       setIsLoading(false);
