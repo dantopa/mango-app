@@ -70,12 +70,15 @@ if (typeof globalThis !== "undefined") {
 const API_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
 
 // =============================================================================
-// Install — precache App Shell URLs (NO self.skipWaiting(), controlled by update toast)
+// Install — precache App Shell URLs + skipWaiting to ensure push handlers activate immediately
 // =============================================================================
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_SHELL).then((cache) => cache.addAll(PRECACHE_URLS)),
   );
+  // Activate immediately so push notification handlers are always current.
+  // Without this, the new SW sits in "waiting" and pushes may be missed.
+  self.skipWaiting();
 });
 
 // =============================================================================
