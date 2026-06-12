@@ -11,7 +11,9 @@
         "deploy_edge_function",
         "apply_migration",
         "generate_typescript_types",
-        "list_tables"
+        "list_tables",
+        "get_project_url",
+        "get_publishable_keys"
       ]
     },
     "google-workspace": {

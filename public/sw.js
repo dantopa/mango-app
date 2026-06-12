@@ -10,9 +10,10 @@
 
 // =============================================================================
 // Build-time injected values (replaced by scripts/inject-sw-version.mjs)
+// In dev mode these placeholders are not replaced, so we use safe defaults.
 // =============================================================================
-const BUILD_ID = "__BUILD_ID__";
-const PRECACHE_URLS = __PRECACHE_URLS__;
+const BUILD_ID = typeof "__BUILD_ID__" === "string" && "__BUILD_ID__".startsWith("__") ? "dev" : "__BUILD_ID__";
+const PRECACHE_URLS = typeof self.__PRECACHE_URLS__ !== "undefined" ? self.__PRECACHE_URLS__ : ["/"];
 
 // =============================================================================
 // Versioned cache names

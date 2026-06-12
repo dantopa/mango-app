@@ -37,16 +37,20 @@ if (!existsSync(SW_PATH)) {
 
 let sw = readFileSync(SW_PATH, "utf-8");
 
-if (!sw.includes("__BUILD_ID__")) {
-  console.warn("⚠ __BUILD_ID__ placeholder not found in sw.js — already injected?");
+// Replace the dev-safe BUILD_ID line with the actual build ID
+const buildIdLine = /const BUILD_ID = .*?;/;
+if (buildIdLine.test(sw)) {
+  sw = sw.replace(buildIdLine, `const BUILD_ID = "${buildId}";`);
 } else {
-  sw = sw.replace(/__BUILD_ID__/g, buildId);
+  console.warn("⚠ BUILD_ID declaration not found in sw.js");
 }
 
-if (!sw.includes("__PRECACHE_URLS__")) {
-  console.warn("⚠ __PRECACHE_URLS__ placeholder not found in sw.js — already injected?");
+// Replace the dev-safe PRECACHE_URLS line with the actual URLs
+const precacheUrlsLine = /const PRECACHE_URLS = .*?;/;
+if (precacheUrlsLine.test(sw)) {
+  sw = sw.replace(precacheUrlsLine, `const PRECACHE_URLS = ${JSON.stringify(precacheUrls)};`);
 } else {
-  sw = sw.replace("__PRECACHE_URLS__", JSON.stringify(precacheUrls));
+  console.warn("⚠ PRECACHE_URLS declaration not found in sw.js");
 }
 
 writeFileSync(SW_PATH, sw, "utf-8");
