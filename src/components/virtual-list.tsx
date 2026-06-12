@@ -23,6 +23,7 @@ export function VirtualList<T>({
     getScrollElement: () => parentRef.current,
     estimateSize: () => estimateSize,
     overscan,
+    measureElement: (el) => el.getBoundingClientRect().height,
   });
 
   if (items.length === 0) {
@@ -44,13 +45,13 @@ export function VirtualList<T>({
         {virtualizer.getVirtualItems().map((virtualRow) => (
           <div
             key={virtualRow.key}
+            ref={virtualizer.measureElement}
             data-index={virtualRow.index}
             style={{
               position: "absolute",
               top: 0,
               left: 0,
               width: "100%",
-              height: `${virtualRow.size}px`,
               transform: `translateY(${virtualRow.start}px)`,
             }}
           >
