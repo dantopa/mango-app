@@ -92,7 +92,9 @@ const mockSupabase = {
       update: mockUpdate,
       select: vi.fn().mockReturnValue({
         not: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+          eq: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
         }),
       }),
     };
@@ -255,7 +257,9 @@ describe("executePipeline", () => {
         update: mockUpdate,
         select: vi.fn().mockReturnValue({
           not: vi.fn().mockReturnValue({
-            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+            eq: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+            }),
           }),
         }),
       };

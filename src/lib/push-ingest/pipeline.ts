@@ -105,12 +105,18 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     external_ts: externalTs,
   };
 
-  // Get transaction IDs already claimed by other push notifications (multiplicity)
+  // Get transaction IDs already claimed by the SAME package (multiplicity guard).
+  // Only exclude same-source claims — cross-source claims must remain in the
+  // candidate pool so Level 2 (merchant + amount + date) can detect them as dupes.
+  // Bug fix: previously excluded ALL claimed tx IDs regardless of source, which
+  // caused cross-source duplicates (e.g., SMS + Google Wallet for the same purchase)
+  // to slip through undetected.
   const { data: claimedLogs } = await supabase
     .from("push_ingest_log")
     .select("transaction_id")
     .not("transaction_id", "is", null)
-    .eq("user_id", OWNER_USER_ID);
+    .eq("user_id", OWNER_USER_ID)
+    .eq("package_name", payload.packageName);
   const excludeClaimedTxIds = (claimedLogs ?? [])
     .map((l: { transaction_id: string | null }) => l.transaction_id)
     .filter((id: string | null): id is string => Boolean(id));
