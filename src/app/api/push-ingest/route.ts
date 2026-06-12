@@ -8,7 +8,7 @@ import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 
 const OWNER_USER_ID =
   process.env.MAQUINITA_OWNER_USER_ID ??
-  "49b33f55-dcf2-4370-ba9a-204b91f2551d";
+  "e99371b1-6163-4216-b624-c79d8ee01520";
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {

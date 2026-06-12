@@ -18,7 +18,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 // The owner every row is written for. Change this (and redeploy) if you start
 // using your own user instead of the demo one.
 const OWNER_USER_ID =
-  Deno.env.get("MAQUINITA_OWNER_USER_ID") ?? "49b33f55-dcf2-4370-ba9a-204b91f2551d";
+  Deno.env.get("MAQUINITA_OWNER_USER_ID") ?? "e99371b1-6163-4216-b624-c79d8ee01520";
 
 // Shared secret the parser must present. Override via the
 // MAQUINITA_MCP_SECRET function secret in the Supabase dashboard to rotate.

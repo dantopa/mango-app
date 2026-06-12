@@ -38,7 +38,7 @@ grant  execute on function public.vault_get_secret(text) to service_role;
 -- -----------------------------------------------------------------------------
 insert into public.transfer_classification_rules (user_id, pattern, match_type, list_type, description)
 values (
-  '49b33f55-dcf2-4370-ba9a-204b91f2551d',
+  'e99371b1-6163-4216-b624-c79d8ee01520',
   'PALOMMA',
   'ilike',
   'allowlist',
