@@ -44,19 +44,38 @@ const mockInsert = vi.fn().mockResolvedValue({ data: null, error: null });
 const mockUpdateEq = vi.fn().mockResolvedValue({ data: null, error: null });
 const mockUpdate = vi.fn(() => ({ eq: mockUpdateEq }));
 const mockSelectSingle = vi.fn().mockResolvedValue({ data: { id: "tx-001" }, error: null });
-const mockSelect = vi.fn(() => ({
-  single: mockSelectSingle,
-  eq: vi.fn().mockReturnValue({
-    eq: vi.fn().mockReturnValue({
-      gte: vi.fn().mockReturnValue({
-        lte: vi.fn().mockResolvedValue({ data: [], error: null }),
-      }),
-    }),
-  }),
-  not: vi.fn().mockReturnValue({
-    eq: vi.fn().mockResolvedValue({ data: [], error: null }),
-  }),
-}));
+
+/** Creates a deeply chainable mock that resolves to { data: [], error: null } at any terminal point */
+function createChainableMock(resolvedValue = { data: [] as unknown[], error: null }): ReturnType<typeof vi.fn> {
+  const chainable: Record<string, unknown> = {};
+  const handler = vi.fn((): typeof chainable => chainable);
+  chainable.eq = handler;
+  chainable.neq = handler;
+  chainable.gte = handler;
+  chainable.lte = handler;
+  chainable.in = handler;
+  chainable.not = handler;
+  chainable.single = vi.fn().mockResolvedValue(resolvedValue);
+  // Make it thenable so awaiting the chain resolves
+  chainable.then = (resolve: (v: typeof resolvedValue) => void, reject?: (e: unknown) => void) =>
+    Promise.resolve(resolvedValue).then(resolve, reject);
+  return handler;
+}
+
+const mockSelect = vi.fn(() => {
+  const chain = createChainableMock({ data: [], error: null });
+  return {
+    single: mockSelectSingle,
+    eq: chain,
+    neq: chain,
+    gte: chain,
+    lte: chain,
+    in: chain,
+    not: chain,
+    then: (resolve: (v: { data: unknown[]; error: null }) => void, reject?: (e: unknown) => void) =>
+      Promise.resolve({ data: [] as unknown[], error: null }).then(resolve, reject),
+  };
+});
 const mockInsertSelect = vi.fn(() => ({ select: () => ({ single: mockSelectSingle }) }));
 
 const mockSupabase = {
@@ -75,6 +94,7 @@ const mockSupabase = {
       return {
         insert: mockInsertSelect,
         select: mockSelect,
+        delete: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ data: null, error: null }) })),
       };
     }
     if (table === "user_settings") {
@@ -90,12 +110,18 @@ const mockSupabase = {
     return {
       insert: mockInsert,
       update: mockUpdate,
-      select: vi.fn().mockReturnValue({
-        not: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
-          }),
-        }),
+      select: vi.fn(() => {
+        const chain = createChainableMock({ data: [], error: null });
+        return {
+          not: chain,
+          eq: chain,
+          neq: chain,
+          gte: chain,
+          lte: chain,
+          in: chain,
+          then: (resolve: (v: { data: unknown[]; error: null }) => void, reject?: (e: unknown) => void) =>
+            Promise.resolve({ data: [] as unknown[], error: null }).then(resolve, reject),
+        };
       }),
     };
   }),
@@ -252,15 +278,28 @@ describe("executePipeline", () => {
           }),
         };
       }
+      if (table === "transactions") {
+        return {
+          insert: mockInsert,
+          select: mockSelect,
+          delete: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ data: null, error: null }) })),
+        };
+      }
       return {
         insert: mockInsert,
         update: mockUpdate,
-        select: vi.fn().mockReturnValue({
-          not: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              eq: vi.fn().mockResolvedValue({ data: [], error: null }),
-            }),
-          }),
+        select: vi.fn(() => {
+          const chain = createChainableMock({ data: [], error: null });
+          return {
+            not: chain,
+            eq: chain,
+            neq: chain,
+            gte: chain,
+            lte: chain,
+            in: chain,
+            then: (resolve: (v: { data: unknown[]; error: null }) => void, reject?: (e: unknown) => void) =>
+              Promise.resolve({ data: [] as unknown[], error: null }).then(resolve, reject),
+          };
         }),
       };
     });

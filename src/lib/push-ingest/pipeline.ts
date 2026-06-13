@@ -72,6 +72,81 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     status: "processing",
   });
 
+  // 4.1. PENDING cleanup — Google Wallet "PENDING" authorization removal
+  const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
+  if (
+    payload.packageName === GOOGLE_WALLET_PACKAGE &&
+    parsed.merchant &&
+    parsed.merchant.toLowerCase().includes("pending")
+  ) {
+    // Search for a recently-created transaction with same amount/currency/date
+    const { data: pendingMatches } = await supabase
+      .from("transactions")
+      .select("id")
+      .eq("user_id", OWNER_USER_ID)
+      .eq("amount_native", parsed.amount_native)
+      .eq("native_currency", parsed.native_currency)
+      .eq("tx_date", parsed.tx_date)
+      .gte("created_at", new Date(Date.now() - 120 * 60 * 1000).toISOString());
+
+    if (pendingMatches && pendingMatches.length > 0) {
+      const deletedTxId = pendingMatches[0].id;
+      await supabase.from("transactions").delete().eq("id", deletedTxId);
+      await supabase.from("push_ingest_log").update({
+        status: "pending_cleanup",
+        transaction_id: deletedTxId,
+      }).eq("dedup_key", dedupKey);
+      console.log(`[push-ingest][pending-cleanup] deleted pending tx=${deletedTxId}`);
+      return { status: "pending_cleanup" };
+    }
+    // No match found — still don't register the PENDING notification itself
+    await supabase.from("push_ingest_log").update({
+      status: "pending_cleanup",
+    }).eq("dedup_key", dedupKey);
+    console.log(`[push-ingest][pending-cleanup] PENDING notification discarded, no matching tx found`);
+    return { status: "pending_cleanup" };
+  }
+
+  // 4.2. Google Wallet 3-minute echo dedup
+  // If same amount+currency was registered by a DIFFERENT source within 3 minutes,
+  // and one of the two sides is Google Wallet, discard the current notification.
+  {
+    const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+    const { data: recentTxs } = await supabase
+      .from("transactions")
+      .select("id, created_at")
+      .eq("user_id", OWNER_USER_ID)
+      .eq("amount_native", parsed.amount_native)
+      .eq("native_currency", parsed.native_currency)
+      .gte("created_at", threeMinAgo);
+
+    if (recentTxs && recentTxs.length > 0) {
+      // Check if any of these were created by a DIFFERENT package via push_ingest_log
+      const recentTxIds = recentTxs.map((tx: { id: string }) => tx.id);
+      const { data: ingestLogs } = await supabase
+        .from("push_ingest_log")
+        .select("transaction_id, package_name")
+        .in("transaction_id", recentTxIds)
+        .neq("package_name", payload.packageName);
+
+      if (ingestLogs && ingestLogs.length > 0) {
+        // One of the two (existing or current) must be Google Wallet
+        const currentIsWallet = payload.packageName === GOOGLE_WALLET_PACKAGE;
+        const existingIsWallet = ingestLogs.some(
+          (log: { package_name: string }) => log.package_name === GOOGLE_WALLET_PACKAGE
+        );
+
+        if (currentIsWallet || existingIsWallet) {
+          await supabase.from("push_ingest_log").update({
+            status: "deduped_wallet_echo",
+          }).eq("dedup_key", dedupKey);
+          console.log(`[push-ingest][wallet-echo] discarded duplicate: current=${payload.packageName}, existing matched wallet echo`);
+          return { status: "deduped_wallet_echo" };
+        }
+      }
+    }
+  }
+
   // 5. Classify (transfer vs expense)
   const classification = await classifyTransaction(parsed, OWNER_USER_ID);
   if (classification.type === "transfer") {

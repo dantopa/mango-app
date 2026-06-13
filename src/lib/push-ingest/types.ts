@@ -46,7 +46,9 @@ export type PipelineResult =
   | { status: "fx_pending"; dedup_key: string }
   | { status: "deduped_cross_source"; kept_key: string }
   | { status: "registration_failed"; error: string }
-  | { status: "pending_confirmation"; dedup_key: string; merchant: string | null; amount: number; currency: string };
+  | { status: "pending_confirmation"; dedup_key: string; merchant: string | null; amount: number; currency: string }
+  | { status: "pending_cleanup" }
+  | { status: "deduped_wallet_echo" };
 
 /** Modos de operación */
 export type IngestMode = "log_only" | "full_pipeline";
