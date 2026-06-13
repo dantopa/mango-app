@@ -13,9 +13,9 @@ import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
  * - ARS: "$12.500,00" — dot as thousands, comma as decimal (Argentine locale)
  */
 
-// Match "USD{amount}" or "${amount}" with Argentine locale (dot=thousands, comma=decimal)
+// Match "USD{amount}" or "${amount}" or "ARS{amount}" with Argentine locale (dot=thousands, comma=decimal)
 const RE_USD_AMOUNT = /USD([\d.,]+)/i;
-const RE_ARS_AMOUNT = /\$([\d.,]+)/;
+const RE_ARS_AMOUNT = /(?:ARS|\$)([\d.,]+)/;
 
 // Merchant: everything between " a " and ", con tu"
 const RE_MERCHANT = / a (.+?), con tu/i;

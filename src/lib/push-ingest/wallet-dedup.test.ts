@@ -57,6 +57,7 @@ vi.mock("../sync/dedup-core", () => ({
 
 vi.mock("./parsers/llm-fallback", () => ({
   isFinancialPackage: vi.fn(() => false),
+  shouldTryLlmFallback: vi.fn(() => false),
   tryTemplateParser: vi.fn(() => null),
   llmFallbackParser: vi.fn(() => null),
 }));

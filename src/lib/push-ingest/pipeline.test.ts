@@ -137,6 +137,7 @@ vi.mock("../sync/dedup-core", () => ({
 
 vi.mock("./parsers/llm-fallback", () => ({
   isFinancialPackage: vi.fn(() => false),
+  shouldTryLlmFallback: vi.fn(() => false),
   tryTemplateParser: vi.fn(() => null),
   llmFallbackParser: vi.fn(() => null),
 }));
@@ -148,7 +149,7 @@ import { executePipeline } from "./pipeline";
 import { isDuplicate } from "./dedup";
 import { getParser } from "./parser-registry";
 import { resolveRate } from "./fx";
-import { isFinancialPackage, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
+import { isFinancialPackage, shouldTryLlmFallback, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
 import { classifyTransaction } from "./classifier";
 import { resolveDuplicate } from "../sync/dedup-core";
 
@@ -215,6 +216,7 @@ describe("executePipeline", () => {
     vi.mocked(getParser).mockReturnValue(() => null);
     vi.mocked(tryTemplateParser).mockResolvedValue(null);
     vi.mocked(isFinancialPackage).mockReturnValue(true);
+    vi.mocked(shouldTryLlmFallback).mockReturnValue(true);
     vi.mocked(llmFallbackParser).mockResolvedValue(parsedTx);
 
     const result = await executePipeline(basePayload, "full_pipeline");

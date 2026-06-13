@@ -25,6 +25,24 @@ export function isFinancialPackage(packageName: string): boolean {
   return FINANCIAL_PACKAGES.has(packageName);
 }
 
+/**
+ * Pre-filter: some financial packages send tons of marketing/delivery spam.
+ * If the deterministic parser already rejected this notification, check if
+ * it's actually spam before sending to the expensive LLM fallback.
+ */
+const PACKAGE_TITLE_REQUIREMENTS: Record<string, RegExp> = {
+  // Rappi only sends real purchases with "Compra exitosa" in the title
+  "com.grability.rappi": /compra exitosa/i,
+};
+
+/** Returns true if the notification should be sent to LLM fallback */
+export function shouldTryLlmFallback(packageName: string, title: string): boolean {
+  if (!FINANCIAL_PACKAGES.has(packageName)) return false;
+  const titleRequirement = PACKAGE_TITLE_REQUIREMENTS[packageName];
+  if (titleRequirement && !titleRequirement.test(title)) return false;
+  return true;
+}
+
 /** Add a package to the financial whitelist at runtime */
 export function addFinancialPackage(packageName: string): void {
   FINANCIAL_PACKAGES.add(packageName);
