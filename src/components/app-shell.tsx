@@ -9,6 +9,7 @@ import {
   Wallet,
   Target,
   CalendarCheck,
+  Settings,
   Sparkles,
   LogOut,
 } from "lucide-react";
@@ -33,6 +34,7 @@ const NAV = [
   { href: "/patrimonio", label: "Patrimonio", short: "Cuentas", icon: Wallet },
   { href: "/objetivos", label: "Objetivos", short: "Metas", icon: Target },
   { href: "/cierre", label: "Cierre mensual", short: "Cierre", icon: CalendarCheck },
+  { href: "/settings", label: "Configuración", short: "Config", icon: Settings },
 ] as const;
 
 function isActive(pathname: string, href: string) {
@@ -122,7 +124,7 @@ export function AppShell({
 
       {/* Mobile bottom tab bar */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-card/95 backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-border bg-card/95 backdrop-blur md:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {NAV.map(({ href, short, icon: Icon }) => {
