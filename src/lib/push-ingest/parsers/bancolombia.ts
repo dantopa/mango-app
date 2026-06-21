@@ -1,4 +1,5 @@
 import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import { resolveTxDate, TZ_OFFSETS } from "../dates";
 import { parseCopAmount, normalizeDate } from "@/lib/sync/gmail/money";
 
 // --- Classification regexes (ordered most-specific first) ---
@@ -80,14 +81,6 @@ function extractDestinationFromTransfer(text: string): string | null {
 }
 
 /**
- * Get today's date as ISO string (fallback when no date in text).
- */
-function todayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/**
  * Bancolombia push notification parser.
  * Handles: COMPRA, PAGO_QR, PAGO_SERVICIO, TRANSFERENCIA.
  * Ignores: ENTRADA (not an expense).
@@ -109,7 +102,12 @@ export const bancolombiaParser: ParserFn = (payload: PushPayload): ParsedTransac
   const accountName = resolveAccountName(cardDigits);
 
   const dateMatch = text.match(RE_DATE);
-  const txDate = dateMatch ? normalizeDate(dateMatch[1]) : todayISO();
+  let txDate: string;
+  if (dateMatch) {
+    txDate = normalizeDate(dateMatch[1]);
+  } else {
+    txDate = resolveTxDate(payload.timestamp, TZ_OFFSETS.BOGOTA);
+  }
 
   let merchant: string | null = null;
 

@@ -1,4 +1,5 @@
 import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import { resolveTxDate, TZ_OFFSETS } from "../dates";
 
 /**
  * BBVA Argentina push notification parser.
@@ -33,18 +34,6 @@ function parseArgAmount(raw: string): number {
   return parseFloat(cleaned);
 }
 
-/**
- * Convert epoch ms to YYYY-MM-DD in America/Argentina/Buenos_Aires (UTC-3).
- */
-function timestampToLocalDate(epochMs: number): string {
-  const offsetMs = 3 * 60 * 60 * 1000;
-  const local = new Date(epochMs - offsetMs);
-  const y = local.getUTCFullYear();
-  const m = String(local.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(local.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
 export const bbvaArgentinaParser: ParserFn = (payload: PushPayload): ParsedTransaction | null => {
   const { title, text } = payload;
 
@@ -76,11 +65,8 @@ export const bbvaArgentinaParser: ParserFn = (payload: PushPayload): ParsedTrans
   const cardMatch = text.match(RE_CARD_DIGITS);
   const cardDigits = cardMatch ? cardMatch[1] : null;
 
-  // Date from payload timestamp
-  const postedAt = typeof payload.timestamp === "number"
-    ? payload.timestamp
-    : Date.now();
-  const txDate = timestampToLocalDate(postedAt);
+  // Date from payload timestamp — Buenos Aires (UTC-3)
+  const txDate = resolveTxDate(payload.timestamp, TZ_OFFSETS.BUENOS_AIRES);
 
   // Resolve account by card network mentioned in the notification
   let accountName = "BBVA";

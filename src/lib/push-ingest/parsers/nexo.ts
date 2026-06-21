@@ -1,4 +1,5 @@
 import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import { resolveTxDate } from "../dates";
 
 /**
  * Nexo Card push notification parser.
@@ -14,11 +15,6 @@ const RE_PAYMENT_EN = /payment of ([\d.,]+) (\w+) .* at (.+?)\.?\s*(?:Cashback|$
 
 // Promotional/non-financial patterns to skip
 const RE_PROMO = /opera más|usa futures|multiplica|saldo de trading|precio de|descubre|aprovecha/i;
-
-function todayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 export const nexoParser: ParserFn = (payload: PushPayload): ParsedTransaction | null => {
   const text = payload.text;
@@ -45,7 +41,7 @@ export const nexoParser: ParserFn = (payload: PushPayload): ParsedTransaction | 
     amount_native: amount,
     native_currency: currency === "USD" ? "USD" : currency,
     merchant,
-    tx_date: todayISO(),
+    tx_date: resolveTxDate(payload.timestamp),
     description_raw: text,
     account_name: "Nexo Card",
   };

@@ -1,4 +1,5 @@
 import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import { resolveTxDate } from "../dates";
 
 /**
  * Rappi / RappiCard push notification parser.
@@ -11,11 +12,6 @@ const RE_COMPRA = /tu compra en (.+?) por \$ ([\d.,]+) fue exitosa/i;
 
 // Patterns that indicate non-financial notifications (delivery updates)
 const RE_DELIVERY = /pedido (entregado|cancelado)|en camino|ya casi llega|alístate|llegó.*pedido/i;
-
-function todayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function parseAmount(raw: string): number {
   // "33.300" or "827.583" — Colombian format: dots are thousands, no decimals
@@ -44,7 +40,7 @@ export const rappiParser: ParserFn = (payload: PushPayload): ParsedTransaction |
     amount_native: amount,
     native_currency: "COP",
     merchant,
-    tx_date: todayISO(),
+    tx_date: resolveTxDate(payload.timestamp),
     description_raw: text,
     account_name: "Rappi",
   };

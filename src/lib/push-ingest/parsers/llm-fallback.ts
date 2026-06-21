@@ -1,4 +1,5 @@
 import type { ParsedTransaction, PushPayload } from "../types";
+import { resolveTxDate } from "../dates";
 import { getSupabaseAdmin } from "../supabase-admin";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
@@ -112,7 +113,7 @@ export async function tryTemplateParser(payload: PushPayload): Promise<ParsedTra
         amount_native: amount,
         native_currency: tpl.currency,
         merchant: merchant?.trim() ?? null,
-        tx_date: todayISO(),
+        tx_date: resolveTxDate(payload.timestamp),
         description_raw: `${payload.title}: ${payload.text}`,
         account_name: tpl.account_name,
       };
@@ -205,7 +206,7 @@ Respond in JSON only:
       amount_native: extraction.amount,
       native_currency: extraction.currency,
       merchant: extraction.merchant,
-      tx_date: todayISO(),
+      tx_date: resolveTxDate(payload.timestamp),
       description_raw: `${payload.title}: ${payload.text}`,
       account_name: extraction.account_name,
     };
@@ -257,11 +258,6 @@ async function saveTemplate(packageName: string, extraction: LlmExtraction, isEx
 }
 
 // --- Helpers ---
-
-function todayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function parseAmount(raw: string): number {
   // Handle various formats: "33.300" (CO dots=thousands), "17,50" (comma decimal), "827583"

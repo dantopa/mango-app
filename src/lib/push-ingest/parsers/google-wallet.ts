@@ -1,4 +1,5 @@
 import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import { resolveTxDate } from "../dates";
 
 /**
  * Google Wallet push notification parser.
@@ -36,15 +37,10 @@ function derivePaymentType(text: string): string {
 
 /**
  * Convert epoch ms to YYYY-MM-DD in America/Bogota (UTC-5, no DST).
- * Same pattern as `internalDateToLocal` in the RappiCard Gmail parser.
+ * @deprecated Use `epochToLocalDate` from `../dates` directly. Kept for test compat.
  */
 export function timestampToLocalDate(epochMs: number): string {
-  const offsetMs = 5 * 60 * 60 * 1000;
-  const local = new Date(epochMs - offsetMs);
-  const y = local.getUTCFullYear();
-  const m = String(local.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(local.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return resolveTxDate(epochMs);
 }
 
 /**
@@ -80,10 +76,7 @@ export const googleWalletParser: ParserFn = (payload: PushPayload): ParsedTransa
   // Date: use postedAt from payload, converted to America/Bogota (UTC-5, no DST).
   // On Vercel the server clock is UTC, so a notification at 20:30 Bogotá (01:30 UTC next day)
   // would register the wrong date if we used getFullYear/getMonth/getDate directly.
-  const postedAt = typeof payload.timestamp === "number"
-    ? new Date(payload.timestamp)
-    : new Date();
-  const txDate = timestampToLocalDate(postedAt.getTime());
+  const txDate = resolveTxDate(payload.timestamp);
 
   return {
     amount_native: amount,
