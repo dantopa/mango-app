@@ -25,7 +25,7 @@ const OWNER_USER_ID =
 const SECRET =
   Deno.env.get("MAQUINITA_MCP_SECRET") ?? "mqnt_3f9aK7Qe2hV8sLpZ1xR6yTbN4wD0cJ5";
 
-const SERVER_INFO = { name: "maquinita-mcp", version: "1.1.0" };
+const SERVER_INFO = { name: "maquinita-mcp", version: "1.2.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 const supabase = createClient(
@@ -197,6 +197,79 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
       .order("name");
     if (error) throw new Error(error.message);
     return data;
+  },
+
+  // --- Accounts CRUD ---------------------------------------------------------
+
+  async crear_cuenta(args) {
+    if (!args.name) throw new Error("Falta name");
+    if (!args.native_currency) {
+      throw new Error("Falta native_currency (USD, COP, ARS, USDT, …)");
+    }
+    const validTypes = ["crypto", "broker", "bank", "wallet", "cash"];
+    const type = args.type ?? "bank";
+    if (!validTypes.includes(type)) {
+      throw new Error(`type inválido: ${type}. Usá uno de: ${validTypes.join(", ")}`);
+    }
+
+    // Idempotente: si ya existe una cuenta con ese nombre, la devuelve.
+    const cols = "id, name, type, native_currency, country, payment_type, is_active";
+    const { data: existing, error: exErr } = await supabase
+      .from("accounts")
+      .select(cols)
+      .eq("user_id", OWNER_USER_ID)
+      .ilike("name", args.name);
+    if (exErr) throw new Error(exErr.message);
+    if (existing && existing.length > 0) {
+      return { ok: true, created: false, account: existing[0] };
+    }
+
+    const { data, error } = await supabase
+      .from("accounts")
+      .insert({
+        user_id: OWNER_USER_ID,
+        name: args.name,
+        type,
+        native_currency: args.native_currency,
+        country: args.country ?? null,
+        payment_type: args.payment_type ?? null,
+        is_active: args.is_active ?? true,
+      })
+      .select(cols)
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, created: true, account: data };
+  },
+
+  async actualizar_cuenta(args) {
+    const account = await resolveAccount(args); // throws if not found
+    const validTypes = ["crypto", "broker", "bank", "wallet", "cash"];
+    // deno-lint-ignore no-explicit-any
+    const patch: Record<string, any> = {};
+    if (args.name !== undefined) patch.name = args.name;
+    if (args.type !== undefined) {
+      if (!validTypes.includes(args.type)) {
+        throw new Error(`type inválido: ${args.type}. Usá uno de: ${validTypes.join(", ")}`);
+      }
+      patch.type = args.type;
+    }
+    if (args.native_currency !== undefined) patch.native_currency = args.native_currency;
+    if (args.country !== undefined) patch.country = args.country;
+    if (args.payment_type !== undefined) patch.payment_type = args.payment_type;
+    if (args.is_active !== undefined) patch.is_active = args.is_active;
+    if (Object.keys(patch).length === 0) {
+      throw new Error("No pasaste ningún campo a actualizar");
+    }
+
+    const { data, error } = await supabase
+      .from("accounts")
+      .update(patch)
+      .eq("id", account.id)
+      .eq("user_id", OWNER_USER_ID)
+      .select("id, name, type, native_currency, country, payment_type, is_active")
+      .single();
+    if (error) throw new Error(error.message);
+    return { ok: true, account: data };
   },
 
   async registrar_transaccion(args) {
@@ -506,6 +579,43 @@ const TOOLS = [
     name: "leer_categorias",
     description: "Lista las categorías del dueño (id, nombre, color). Usalo para resolver nombre→id.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "crear_cuenta",
+    description:
+      "Crea una cuenta/billetera nueva del dueño. Idempotente por nombre (si ya existe la devuelve sin duplicar). Tenés que crear la cuenta ANTES de cargarle transacciones o snapshots.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Nombre de la cuenta, ej 'Wise Personal'." },
+        type: { type: "string", description: "crypto | broker | bank | wallet | cash. Default bank." },
+        native_currency: { type: "string", description: "Moneda nativa: USD, COP, ARS, USDT, …" },
+        country: { type: "string", description: "AR | CO | US | global (opcional)." },
+        payment_type: {
+          type: "string",
+          description: "credito | debito | transferencia | pse_qr | efectivo | inversion | wallet (opcional).",
+        },
+        is_active: { type: "boolean", description: "Default true." },
+      },
+      required: ["name", "native_currency"],
+    },
+  },
+  {
+    name: "actualizar_cuenta",
+    description:
+      "Actualiza una cuenta existente (identificala por account_id o account_name). Pasá solo los campos a cambiar. Sirve para renombrar, cambiar medio de pago/país o desactivar (is_active=false).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...accountRef,
+        name: { type: "string", description: "Nuevo nombre (opcional)." },
+        type: { type: "string", description: "crypto | broker | bank | wallet | cash (opcional)." },
+        native_currency: { type: "string", description: "Nueva moneda (opcional)." },
+        country: { type: "string", description: "AR | CO | US | global (opcional)." },
+        payment_type: { type: "string", description: "Nuevo medio de pago (opcional)." },
+        is_active: { type: "boolean", description: "Activar/desactivar la cuenta (opcional)." },
+      },
+    },
   },
   {
     name: "registrar_transaccion",

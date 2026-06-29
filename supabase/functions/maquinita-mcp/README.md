@@ -42,6 +42,8 @@ No usa OAuth: el secret va en la URL, así que conecta como *no-auth connector*.
 |------|----------|
 | `leer_cuentas` | Lista cuentas (id, nombre, tipo, moneda, **país, medio de pago**) → resolver nombre→id. |
 | `leer_categorias` | Lista categorías (id, nombre, color) → resolver nombre→id. |
+| `crear_cuenta` | Crea una cuenta/billetera (idempotente por nombre). Requerida ANTES de cargarle transacciones/snapshots. |
+| `actualizar_cuenta` | Edita una cuenta existente (renombrar, país, medio de pago, desactivar). |
 | `registrar_transaccion` | Inserta un consumo. Acepta `account_name`/`category_name` o sus ids + dimensiones `country`/`payment_type`/`expense_type`. Calcula `amount_usd` si no se pasa. |
 | `registrar_transacciones_lote` | Inserta muchas de una (`{ items: [...] }`). |
 | `upsert_snapshot` | Crea/actualiza saldo de cuenta a una fecha (upsert por `account_id+snapshot_date`). |
