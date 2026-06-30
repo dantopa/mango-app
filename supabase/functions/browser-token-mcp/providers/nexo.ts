@@ -10,7 +10,7 @@ import type { NexoSessionToken, ProviderModule, ToolResult } from "../types.ts";
 import { redactToken, sanitizeError } from "../security.ts";
 
 const NEXO_BASE = "https://platform.nexo.com";
-const BALANCES_PATH = "/api/trading/advanced/facade/api/v1/balances";
+const BALANCES_PATH = "/api/1/get_balances";
 const ENVELOPES_PATH = "/api/platform/envelope/v1/envelopes";
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -116,33 +116,63 @@ async function nexoFetch(
 // --- Balances ----------------------------------------------------------------
 
 async function handleGetBalances(s: NexoSessionToken, token: string): Promise<ToolResult> {
-  const res = await nexoFetch(`${NEXO_BASE}${BALANCES_PATH}`, s, token, "GET");
+  const res = await nexoFetch(`${NEXO_BASE}${BALANCES_PATH}`, s, token, "POST", "{}");
   if (!(res instanceof Response)) return res;
   const data = await res.json();
   return { content: [{ type: "text", text: JSON.stringify(formatBalances(data)) }] };
 }
 
-function formatBalances(data: unknown): Array<{ currency: string; available: string; total: string }> {
-  if (!data || typeof data !== "object") return [];
-  const root = data as Record<string, unknown>;
-  let entries: unknown[] = [];
-  if (root.payload && typeof root.payload === "object") {
-    const p = root.payload as Record<string, unknown>;
-    if (Array.isArray(p.balances)) entries = p.balances;
-  } else if (Array.isArray(root.balances)) {
-    entries = root.balances;
+function formatBalances(data: unknown): {
+  total_portfolio_usd: number;
+  available_today_usd: number;
+  locked_term_usd: number;
+  balances: Array<{
+    currency: string;
+    wallet_liquid: string;
+    flexible_earn: string;
+    locked_term: string;
+    total: string;
+    total_usd: number;
+  }>;
+} {
+  if (!data || typeof data !== "object") {
+    return { total_portfolio_usd: 0, available_today_usd: 0, locked_term_usd: 0, balances: [] };
   }
-  const out: Array<{ currency: string; available: string; total: string }> = [];
+  const root = data as Record<string, unknown>;
+  const p = (root.payload ?? {}) as Record<string, unknown>;
+  const entries: unknown[] = Array.isArray(p.balances) ? p.balances : [];
+  const out: Array<{
+    currency: string;
+    wallet_liquid: string;
+    flexible_earn: string;
+    locked_term: string;
+    total: string;
+    total_usd: number;
+  }> = [];
   for (const e of entries) {
     if (!e || typeof e !== "object") continue;
     const r = e as Record<string, unknown>;
-    const currency = String(r.short_name ?? r.currency_identity ?? "");
     const total = Number(r.total_balance ?? 0);
-    if (currency && total > 0) {
-      out.push({ currency, available: String(r.balance ?? "0"), total: String(r.total_balance ?? "0") });
+    if (total > 0) {
+      const usdCourse = Number(r.usd_course ?? 0);
+      out.push({
+        currency: String(r.short_name ?? ""),
+        wallet_liquid: String(r.credit_line_balance ?? r.balance ?? "0"),
+        flexible_earn: String(r.deposit_balance ?? "0"),
+        locked_term: String(r.locked_balance ?? "0"),
+        total: String(total),
+        total_usd: Math.round(total * usdCourse * 1e4) / 1e4,
+      });
     }
   }
-  return out;
+  const availableToday =
+    Number(p.total_amount_in_deposit_wallet_in_usd ?? 0) + Number(p.total_amount_in_credit_wallet_in_usd ?? 0);
+  return {
+    total_portfolio_usd: Math.round(Number(p.total_portfolio_balance ?? 0) * 1e4) / 1e4,
+    available_today_usd: Math.round(availableToday * 1e4) / 1e4,
+    locked_term_usd: Math.round(Number(p.total_amount_in_locked_wallet_in_usd ?? 0) * 1e4) / 1e4,
+    balances: out,
+  };
 }
 
 // --- Card Transactions -------------------------------------------------------
