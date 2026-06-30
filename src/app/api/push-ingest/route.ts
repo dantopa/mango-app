@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { validateAuth } from "@/lib/push-ingest/auth";
+import { isWhitelistedPackage } from "@/lib/push-ingest/package-whitelist";
 import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
@@ -40,10 +41,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "invalid_json" }, { status: 400 });
     }
 
-    // 5. Always save raw log first (so we never lose a notification)
+    // 5. Extract package name and check whitelist
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rawPayload = body as Record<string, unknown>;
     const packageName = String(rawPayload.packageName ?? rawPayload.appName ?? rawPayload.package ?? "unknown");
+
+    if (!isWhitelistedPackage(packageName)) {
+      return NextResponse.json({ status: "ignored", package_name: packageName });
+    }
+
+    // 6. Save raw log (so we never lose a whitelisted notification)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const supabase = getSupabaseAdmin() as any;
 
@@ -56,7 +63,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         received_at: new Date().toISOString(),
       });
 
-    // 6. Validate and run pipeline
+    // 7. Validate and run pipeline
     const parseResult = pushPayloadSchema.safeParse(body);
     if (!parseResult.success) {
       // Logged raw but can't process — respond 200 (notification is safe)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isFinancialPackage, addFinancialPackage, tryTemplateParser, llmFallbackParser } from "./llm-fallback";
+import { isFinancialPackage, tryTemplateParser, llmFallbackParser } from "./llm-fallback";
 import type { PushPayload } from "../types";
 
 // Mock the supabase admin
@@ -33,7 +33,7 @@ function mockChain(data: unknown[] | null = null, error: unknown = null) {
   return chain;
 }
 
-describe("isFinancialPackage", () => {
+describe("isFinancialPackage (uses shared PACKAGE_WHITELIST)", () => {
   it("returns true for known financial packages", () => {
     expect(isFinancialPackage("com.grability.rappi")).toBe(true);
     expect(isFinancialPackage("com.todo1.mobile")).toBe(true);
@@ -47,15 +47,6 @@ describe("isFinancialPackage", () => {
     expect(isFinancialPackage("com.spotify.music")).toBe(false);
     expect(isFinancialPackage("com.whatsapp")).toBe(false);
     expect(isFinancialPackage("com.instagram.android")).toBe(false);
-  });
-});
-
-describe("addFinancialPackage", () => {
-  it("adds a new package to the whitelist", () => {
-    const testPkg = "com.test.financial.app";
-    expect(isFinancialPackage(testPkg)).toBe(false);
-    addFinancialPackage(testPkg);
-    expect(isFinancialPackage(testPkg)).toBe(true);
   });
 });
 

@@ -1,29 +1,13 @@
 import type { ParsedTransaction, PushPayload } from "../types";
 import { resolveTxDate } from "../dates";
+import { PACKAGE_WHITELIST } from "../package-whitelist";
 import { getSupabaseAdmin } from "../supabase-admin";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
-/**
- * Whitelist of package names that may contain financial notifications.
- * Only these get sent to the LLM fallback — everything else is ignored.
- */
-const FINANCIAL_PACKAGES = new Set([
-  "com.grability.rappi",       // Rappi / RappiCard
-  "com.todo1.mobile",          // Bancolombia
-  "com.bbva.nxt_argentina",    // BBVA Argentina
-  "com.nexowallet",            // Nexo
-  "com.nequi.MobileApp",       // Nequi
-  "com.google.android.apps.walletnfcrel", // Google Wallet
-  "com.google.android.apps.messaging",    // SMS (may have bank alerts)
-  "com.samsung.android.messaging",
-  "com.android.mms",
-  // Add more as discovered
-]);
-
-/** Is this package potentially financial? */
+/** Is this package potentially financial? Uses the shared whitelist. */
 export function isFinancialPackage(packageName: string): boolean {
-  return FINANCIAL_PACKAGES.has(packageName);
+  return PACKAGE_WHITELIST.has(packageName);
 }
 
 /**
@@ -38,15 +22,10 @@ const PACKAGE_TITLE_REQUIREMENTS: Record<string, RegExp> = {
 
 /** Returns true if the notification should be sent to LLM fallback */
 export function shouldTryLlmFallback(packageName: string, title: string): boolean {
-  if (!FINANCIAL_PACKAGES.has(packageName)) return false;
+  if (!PACKAGE_WHITELIST.has(packageName)) return false;
   const titleRequirement = PACKAGE_TITLE_REQUIREMENTS[packageName];
   if (titleRequirement && !titleRequirement.test(title)) return false;
   return true;
-}
-
-/** Add a package to the financial whitelist at runtime */
-export function addFinancialPackage(packageName: string): void {
-  FINANCIAL_PACKAGES.add(packageName);
 }
 
 interface TemplateRow {
