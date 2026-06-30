@@ -416,6 +416,78 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
     return { ok: true, transaction: data };
   },
 
+  async leer_snapshots(args) {
+    // If snapshot_date is provided, get snapshots for that specific date.
+    // Otherwise, get the latest snapshot per active account.
+    const accounts = await supabase
+      .from("accounts")
+      .select("id, name, type, native_currency")
+      .eq("user_id", OWNER_USER_ID)
+      .eq("is_active", true)
+      .order("name");
+    if (accounts.error) throw new Error(accounts.error.message);
+
+    const snapDate: string | undefined = args?.snapshot_date;
+    let snapshots;
+
+    if (snapDate) {
+      // Exact date
+      const { data, error } = await supabase
+        .from("net_worth_snapshots")
+        .select("account_id, snapshot_date, balance_native, native_currency, fx_rate_to_usd, balance_usd, notes, is_pending")
+        .eq("user_id", OWNER_USER_ID)
+        .eq("snapshot_date", snapDate);
+      if (error) throw new Error(error.message);
+      snapshots = data;
+    } else {
+      // Latest per account: use distinct on via RPC or manual approach
+      // Get the most recent snapshot per account
+      const { data, error } = await supabase
+        .from("net_worth_snapshots")
+        .select("account_id, snapshot_date, balance_native, native_currency, fx_rate_to_usd, balance_usd, notes, is_pending")
+        .eq("user_id", OWNER_USER_ID)
+        .order("snapshot_date", { ascending: false });
+      if (error) throw new Error(error.message);
+
+      // Keep only the latest per account_id
+      const seen = new Set<string>();
+      const latest: typeof data = [];
+      for (const row of data) {
+        if (!seen.has(row.account_id)) {
+          seen.add(row.account_id);
+          latest.push(row);
+        }
+      }
+      snapshots = latest;
+    }
+
+    // Join with account names
+    const accountMap = new Map(accounts.data!.map((a) => [a.id, a]));
+    const result = snapshots.map((s) => {
+      const acct = accountMap.get(s.account_id);
+      return {
+        account_name: acct?.name ?? "desconocida",
+        account_type: acct?.type ?? "unknown",
+        snapshot_date: s.snapshot_date,
+        balance_native: s.balance_native,
+        native_currency: s.native_currency,
+        fx_rate_to_usd: s.fx_rate_to_usd,
+        balance_usd: s.balance_usd,
+        notes: s.notes,
+        is_pending: s.is_pending,
+      };
+    });
+
+    const totalUsd = round4(result.reduce((sum, r) => sum + (r.balance_usd ?? 0), 0));
+
+    return {
+      snapshot_date: snapDate ?? "último de cada cuenta",
+      net_worth_usd: totalUsd,
+      count: result.length,
+      accounts: result.sort((a, b) => (b.balance_usd ?? 0) - (a.balance_usd ?? 0)),
+    };
+  },
+
   async leer_resumen_gastos(args) {
     const { data, error } = await supabase
       .from("transactions")
@@ -719,6 +791,17 @@ const TOOLS = [
         ...categoryRef,
       },
       required: ["transaction_id"],
+    },
+  },
+  {
+    name: "leer_snapshots",
+    description:
+      "Lee los snapshots de patrimonio. Sin fecha devuelve el último snapshot de cada cuenta activa + patrimonio neto total. Con snapshot_date devuelve los de esa fecha exacta.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        snapshot_date: { type: "string", description: "Fecha YYYY-MM-DD (opcional; sin ella devuelve el último de cada cuenta)." },
+      },
     },
   },
   {

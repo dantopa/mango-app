@@ -47,6 +47,7 @@ No usa OAuth: el secret va en la URL, así que conecta como *no-auth connector*.
 | `registrar_transaccion` | Inserta un consumo. Acepta `account_name`/`category_name` o sus ids + dimensiones `country`/`payment_type`/`expense_type`. Calcula `amount_usd` si no se pasa. |
 | `registrar_transacciones_lote` | Inserta muchas de una (`{ items: [...] }`). |
 | `upsert_snapshot` | Crea/actualiza saldo de cuenta a una fecha (upsert por `account_id+snapshot_date`). |
+| `leer_snapshots` | Lee snapshots de patrimonio. Sin fecha → último de cada cuenta + net worth total. Con `snapshot_date` → esa fecha exacta. |
 | `recategorizar` | Cambia la categoría de una transacción (o la limpia con `category_id: null`). |
 | `leer_resumen_gastos` | Total + desglose por categoría de un mes (`YYYY-MM`); excluye pagos. |
 | `leer_cierre` | Lee el cierre de un período (default mes actual) con su checklist. |
