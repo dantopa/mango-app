@@ -41,6 +41,7 @@ export type Database = {
     Tables: {
       accounts: {
         Row: {
+          card_digits: string[]
           country: string | null
           created_at: string
           id: string
@@ -52,6 +53,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          card_digits?: string[]
           country?: string | null
           created_at?: string
           id?: string
@@ -63,6 +65,7 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          card_digits?: string[]
           country?: string | null
           created_at?: string
           id?: string
@@ -330,6 +333,7 @@ export type Database = {
           pending_data: Json | null
           raw_log_id: string | null
           related_dedup_key: string | null
+          reprocessed_at: string | null
           status: string
           transaction_id: string | null
           updated_at: string
@@ -347,6 +351,7 @@ export type Database = {
           pending_data?: Json | null
           raw_log_id?: string | null
           related_dedup_key?: string | null
+          reprocessed_at?: string | null
           status?: string
           transaction_id?: string | null
           updated_at?: string
@@ -364,6 +369,7 @@ export type Database = {
           pending_data?: Json | null
           raw_log_id?: string | null
           related_dedup_key?: string | null
+          reprocessed_at?: string | null
           status?: string
           transaction_id?: string | null
           updated_at?: string
@@ -389,45 +395,51 @@ export type Database = {
       push_parser_templates: {
         Row: {
           account_name: string
-          amount_group: number
+          amount_group: number | null
           created_at: string
           currency: string
           hit_count: number
           id: string
-          is_expense: boolean
           last_hit_at: string | null
           merchant_group: number | null
+          outcome: string
           package_name: string
+          source_text: string | null
+          source_title: string | null
           text_pattern: string
           title_pattern: string | null
           user_id: string
         }
         Insert: {
           account_name: string
-          amount_group?: number
+          amount_group?: number | null
           created_at?: string
           currency?: string
           hit_count?: number
           id?: string
-          is_expense?: boolean
           last_hit_at?: string | null
           merchant_group?: number | null
+          outcome?: string
           package_name: string
+          source_text?: string | null
+          source_title?: string | null
           text_pattern: string
           title_pattern?: string | null
           user_id: string
         }
         Update: {
           account_name?: string
-          amount_group?: number
+          amount_group?: number | null
           created_at?: string
           currency?: string
           hit_count?: number
           id?: string
-          is_expense?: boolean
           last_hit_at?: string | null
           merchant_group?: number | null
+          outcome?: string
           package_name?: string
+          source_text?: string | null
+          source_title?: string | null
           text_pattern?: string
           title_pattern?: string | null
           user_id?: string

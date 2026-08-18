@@ -1,85 +1,76 @@
-import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import type { ParseResult, ParserFn, PushPayload } from "../types";
 import { resolveTxDate, TZ_OFFSETS } from "../dates";
+import { detectCurrency, parseAmount } from "../money";
 
 /**
  * BBVA Argentina push notification parser.
  *
- * Format observed from real notifications:
- * - title: "Compra aprobada"
- * - text: "Por USD17,70 a BOLD SA*COYO TAC, con tu tarjeta Mastercard *1886"
- *         "Por $12.500,00 a MERCADOLIBRE, con tu tarjeta Mastercard *1886"
+ * Formats observed from real notifications:
+ * - approved: title "Compra aprobada"
+ *             "Por USD17,70 a BOLD SA*COYO TAC, con tu tarjeta Mastercard *1886"
+ *             "Por ARS6.490,00 a DLO*Rappi Pro, con tu tarjeta Mastercard *1886"
+ * - declined: title "Compra rechazada"
+ *             "Por ARS23.280,00 a CUOTA SOCIAL - CAR, porque tu tarjeta ... está pausada"
  *
- * Amount formats:
- * - USD: "USD17,70" — comma as decimal separator
- * - ARS: "$12.500,00" — dot as thousands, comma as decimal (Argentine locale)
+ * 49 of the ~55 BBVA notifications in push_raw_log are declined. They must never
+ * become transactions, and — critically — they must be reported as `ignore`, not
+ * as an unparseable notification: returning null used to send them to the LLM,
+ * which happily turned every rejection into a phantom expense.
+ *
+ * Amounts always use the Argentine convention (dot thousands, comma decimal),
+ * including for USD ("USD16,91"); `parseAmount` handles both.
  */
 
-// Match "USD{amount}" or "${amount}" or "ARS{amount}" with Argentine locale (dot=thousands, comma=decimal)
-const RE_USD_AMOUNT = /USD([\d.,]+)/i;
-const RE_ARS_AMOUNT = /(?:ARS|\$)([\d.,]+)/;
+const RE_APPROVED = /compra aprobada/i;
+const RE_DECLINED = /compra rechazada|rechazad[ao]|no pudimos procesar/i;
 
-// Merchant: everything between " a " and ", con tu"
-const RE_MERCHANT = / a (.+?), con tu/i;
+/** "Por <CUR><amount> a <merchant>" — the currency code may be absent ("$"). */
+const RE_AMOUNT = /por\s+((?:ARS|USD|U\$S|US\$|\$)\s*[\d.,]+)/i;
 
-// Card last 4 digits
+/** Merchant sits between " a " and the clause about the card. */
+const RE_MERCHANT = / a (.+?)(?:,| con tu| porque| por ingresar)/i;
+
 const RE_CARD_DIGITS = /\*(\d{4})\b/;
 
-/**
- * Parse Argentine-locale amount: "17,70" → 17.70 or "12.500,00" → 12500.00
- * Convention: dot = thousands separator, comma = decimal separator
- */
-function parseArgAmount(raw: string): number {
-  // Remove dots (thousands), replace comma with dot (decimal)
-  const cleaned = raw.replace(/\./g, "").replace(",", ".");
-  return parseFloat(cleaned);
-}
-
-export const bbvaArgentinaParser: ParserFn = (payload: PushPayload): ParsedTransaction | null => {
+export const bbvaArgentinaParser: ParserFn = (payload: PushPayload): ParseResult => {
   const { title, text } = payload;
+  const titleAndText = `${title} ${text}`;
 
-  // Only parse "Compra aprobada" notifications
-  if (!/compra aprobada/i.test(title)) return null;
+  if (RE_DECLINED.test(titleAndText)) {
+    return { kind: "ignore", reason: "declined purchase" };
+  }
+  if (!RE_APPROVED.test(title)) return { kind: "unknown" };
 
-  // Determine currency and extract amount
-  let amountNative: number;
-  let nativeCurrency: string;
+  const amountMatch = text.match(RE_AMOUNT);
+  if (!amountMatch) return { kind: "unknown" };
 
-  const usdMatch = text.match(RE_USD_AMOUNT);
-  if (usdMatch) {
-    amountNative = parseArgAmount(usdMatch[1]);
-    nativeCurrency = "USD";
-  } else {
-    const arsMatch = text.match(RE_ARS_AMOUNT);
-    if (!arsMatch) return null;
-    amountNative = parseArgAmount(arsMatch[1]);
-    nativeCurrency = "ARS";
+  // A bare "$" from a BBVA app is ARS; an explicit code wins.
+  const currency = detectCurrency(amountMatch[1]) ?? "ARS";
+  const amount = parseAmount(amountMatch[1], currency);
+  if (amount === null || amount <= 0) {
+    // "Compra aprobada por ARS0,00" is an authorization hold, not a purchase.
+    return { kind: "ignore", reason: "approved purchase with no amount" };
   }
 
-  if (amountNative <= 0 || !isFinite(amountNative)) return null;
-
-  // Extract merchant
   const merchantMatch = text.match(RE_MERCHANT);
-  const merchant = merchantMatch ? merchantMatch[1].trim() : null;
-
-  // Card digits
   const cardMatch = text.match(RE_CARD_DIGITS);
-  const cardDigits = cardMatch ? cardMatch[1] : null;
-
-  // Date from payload timestamp — Buenos Aires (UTC-3)
-  const txDate = resolveTxDate(payload.timestamp, TZ_OFFSETS.BUENOS_AIRES);
-
-  // Resolve account by card network mentioned in the notification
-  let accountName = "BBVA";
-  if (/mastercard/i.test(text)) accountName = "BBVA Mastercard";
-  else if (/visa/i.test(text)) accountName = "BBVA Visa";
 
   return {
-    amount_native: amountNative,
-    native_currency: nativeCurrency,
-    merchant,
-    tx_date: txDate,
-    description_raw: `${title} - ${text}`,
-    account_name: accountName,
-    card_last4: cardDigits,
+    kind: "transaction",
+    tx: {
+      amount_native: amount,
+      native_currency: currency,
+      merchant: merchantMatch ? merchantMatch[1].trim() : null,
+      // Buenos Aires (UTC-3).
+      tx_date: resolveTxDate(payload.timestamp, TZ_OFFSETS.BUENOS_AIRES),
+      description_raw: `${title} - ${text}`,
+      // Only a fallback: `card_last4` is what actually resolves the account.
+      account_name: /mastercard/i.test(text)
+        ? "BBVA Mastercard"
+        : /visa/i.test(text)
+          ? "BBVA Visa"
+          : "BBVA",
+      card_last4: cardMatch ? cardMatch[1] : null,
+    },
   };
 };

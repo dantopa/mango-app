@@ -20,10 +20,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const OWNER_USER_ID =
   Deno.env.get("MAQUINITA_OWNER_USER_ID") ?? "e99371b1-6163-4216-b624-c79d8ee01520";
 
-// Shared secret the parser must present. Override via the
-// MAQUINITA_MCP_SECRET function secret in the Supabase dashboard to rotate.
-const SECRET =
-  Deno.env.get("MAQUINITA_MCP_SECRET") ?? "mqnt_3f9aK7Qe2hV8sLpZ1xR6yTbN4wD0cJ5";
+// Shared secret the parser must present. Required: this function holds the
+// service-role key, so a default value baked into the source would be a
+// public credential. No secret set → every request is rejected.
+const SECRET = Deno.env.get("MAQUINITA_MCP_SECRET") ?? "";
 
 const SERVER_INFO = { name: "maquinita-mcp", version: "1.2.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
@@ -930,6 +930,10 @@ Deno.serve(async (req) => {
   }
 
   // Auth: shared secret via header or ?key=
+  if (SECRET === "") {
+    console.error("[maquinita-mcp] MAQUINITA_MCP_SECRET is not set — rejecting every request");
+    return json(rpcError(null, -32001, "No autorizado: servidor sin secret configurado"), 401);
+  }
   const url = new URL(req.url);
   const key = req.headers.get("x-maquinita-key") ?? url.searchParams.get("key");
   if (key !== SECRET) {

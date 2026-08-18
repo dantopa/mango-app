@@ -1,9 +1,42 @@
-import type { ParsedTransaction, PushPayload } from "../types";
+import { z } from "zod";
+
+import type { ParseResult, ParsedTransaction, PushPayload } from "../types";
+import { extractCardLast4, type AccountCandidate } from "../account-resolver";
 import { resolveTxDate } from "../dates";
+import { isKnownCurrency, parseAmount } from "../money";
 import { PACKAGE_WHITELIST } from "../package-whitelist";
 import { getSupabaseAdmin } from "../supabase-admin";
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
+/**
+ * Learned parsing: AI structures a format once, deterministic code runs it forever.
+ *
+ * The rules that make this trustworthy, in order of importance:
+ *
+ *  1. The AI is only asked about formats no parser recognized (`kind: "unknown"`).
+ *     A recognized non-transaction — a declined purchase, a delivery update —
+ *     never reaches it. That is what let it invent 49 phantom BBVA expenses.
+ *  2. The AI never supplies a number. It quotes the amount as it literally
+ *     appears in the notification; we verify the quote exists in the text and
+ *     parse it ourselves with `parseAmount`.
+ *  3. The AI picks an account from the user's real list or returns null. It
+ *     cannot name an account that does not exist.
+ *  4. A template is stored only if replaying it through `applyTemplate` — the
+ *     same function production uses — over the original notification reproduces
+ *     the same extraction. A pattern that cannot parse its own source text is
+ *     worthless, and 28 such templates accumulated with zero hits.
+ */
+
+const OPENAI_MODEL = "gpt-5.4-mini";
+const OPENAI_TIMEOUT_MS = 12_000;
+
+/** Cap on an AI-authored pattern; anything longer is not a notification format. */
+const MAX_PATTERN_LENGTH = 400;
+
+/** Nested quantifiers such as `(.+)+` can blow up on adversarial input. */
+const RE_NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)\s*[+*]/;
+
+/** An AI-authored pattern must expose the amount as a named group. */
+const RE_HAS_AMOUNT_GROUP = /\(\?<amount>/;
 
 /**
  * Pre-filter: some financial packages send tons of marketing/delivery spam.
@@ -23,137 +56,215 @@ export function shouldTryLlmFallback(packageName: string, title: string): boolea
   return true;
 }
 
-interface TemplateRow {
+// --- Templates ---------------------------------------------------------------
+
+export type TemplateOutcome = "expense" | "refund" | "ignore";
+
+export type ParserTemplate = {
   id: string;
   text_pattern: string;
   title_pattern: string | null;
-  amount_group: number;
+  amount_group: number | null;
   merchant_group: number | null;
   currency: string;
   account_name: string;
-  is_expense: boolean;
-  /** Not part of the select above, so it is absent at runtime. */
-  hit_count?: number;
-}
+  outcome: TemplateOutcome;
+  hit_count: number;
+};
 
-/**
- * Try to parse using a saved template from the DB.
- * Returns parsed transaction or null if no template matches.
- */
-export async function tryTemplateParser(payload: PushPayload): Promise<ParsedTransaction | null> {
-  const supabase = getSupabaseAdmin();
+const TEMPLATE_COLUMNS =
+  "id, text_pattern, title_pattern, amount_group, merchant_group, currency, account_name, outcome, hit_count";
 
-  const { data: templates } = await supabase
-    .from("push_parser_templates")
-    .select("id, text_pattern, title_pattern, amount_group, merchant_group, currency, account_name, is_expense")
-    .eq("user_id", OWNER_USER_ID)
-    .eq("package_name", payload.packageName);
+/** Result of executing one template against one notification. */
+export type TemplateExtraction =
+  | { kind: "transaction"; tx: ParsedTransaction }
+  | { kind: "ignore"; reason: string }
+  | { kind: "no_match" };
 
-  if (!templates || templates.length === 0) return null;
-
-  for (const tpl of templates as TemplateRow[]) {
-    // Check title pattern if specified
-    if (tpl.title_pattern) {
-      try {
-        const titleRe = new RegExp(tpl.title_pattern, "i");
-        if (!titleRe.test(payload.title)) continue;
-      } catch { continue; }
-    }
-
-    // Check text pattern
-    try {
-      const textRe = new RegExp(tpl.text_pattern, "i");
-      const match = payload.text.match(textRe);
-      if (!match) continue;
-
-      // Not an expense — return null to skip
-      if (!tpl.is_expense) return null;
-
-      // Extract amount
-      const amountRaw = match[tpl.amount_group];
-      if (!amountRaw) continue;
-      const amount = parseAmount(amountRaw);
-      if (!amount || amount <= 0) continue;
-
-      // Extract merchant if available
-      const merchant = tpl.merchant_group ? (match[tpl.merchant_group] ?? null) : null;
-
-      // Update hit count
-      const { error: hitError } = await supabase
-        .from("push_parser_templates")
-        .update({ hit_count: (tpl.hit_count ?? 0) + 1, last_hit_at: new Date().toISOString() })
-        .eq("id", tpl.id);
-      if (hitError) {
-        console.error(`[llm-fallback] hit_count update failed for template ${tpl.id}:`, hitError.message);
-      }
-
-      return {
-        amount_native: amount,
-        native_currency: tpl.currency,
-        merchant: merchant?.trim() ?? null,
-        tx_date: resolveTxDate(payload.timestamp),
-        description_raw: `${payload.title}: ${payload.text}`,
-        account_name: tpl.account_name,
-      };
-    } catch { continue; }
-  }
-
-  return null;
-}
-
-interface LlmExtraction {
-  is_expense: boolean;
-  amount: number | null;
-  currency: string;
-  merchant: string | null;
-  account_name: string;
-  text_regex: string | null; // Pattern the LLM suggests for future matches
-  amount_group: number;
-  merchant_group: number | null;
-}
-
-/**
- * LLM fallback: ask GPT to extract transaction data from the notification.
- * Also asks it to suggest a regex template for future use.
- */
-export async function llmFallbackParser(payload: PushPayload): Promise<ParsedTransaction | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.log("[llm-fallback] OPENAI_API_KEY not set, skipping");
+/** Compiles a pattern, rejecting anything unsafe or invalid instead of throwing. */
+function compilePattern(pattern: string): RegExp | null {
+  if (pattern.length > MAX_PATTERN_LENGTH) return null;
+  if (RE_NESTED_QUANTIFIER.test(pattern)) return null;
+  try {
+    return new RegExp(pattern, "i");
+  } catch {
     return null;
   }
+}
 
-  const prompt = `Analyze this push notification from a mobile banking/payment app and extract financial transaction data if present.
+/**
+ * Runs a template over a notification.
+ *
+ * This is the single implementation of template execution: production reads and
+ * the save-time self-test both go through it, so a stored template cannot behave
+ * differently from the one that was verified.
+ */
+export function applyTemplate(template: ParserTemplate, payload: PushPayload): TemplateExtraction {
+  if (template.title_pattern !== null) {
+    const titleRe = compilePattern(template.title_pattern);
+    if (!titleRe || !titleRe.test(payload.title)) return { kind: "no_match" };
+  }
 
-Package: ${payload.packageName}
-Title: ${payload.title}
-Text: ${payload.text}
+  const textRe = compilePattern(template.text_pattern);
+  if (!textRe) return { kind: "no_match" };
 
-Respond in JSON only:
-{
-  "is_expense": boolean, // true if this is a purchase/payment notification, false if it's delivery, promo, login, etc
-  "amount": number|null, // transaction amount (positive number), null if not a transaction
-  "currency": "COP"|"ARS"|"USD", // currency code
-  "merchant": string|null, // merchant/store name if identifiable
-  "account_name": string, // which account this belongs to (e.g. "Rappi", "Nequi", "BBVA Visa", "Bancolombia Ahorros")
-  "text_regex": string|null, // a regex pattern that would match this notification format and extract amount (group 1) and merchant (group 2). Use named groups if possible. null if you can't generalize.
-  "amount_group": number, // which capture group in the regex is the amount (1-indexed)
-  "merchant_group": number|null // which capture group is the merchant, null if not extractable by regex
-}`;
+  const match = payload.text.match(textRe);
+  if (!match) return { kind: "no_match" };
 
+  if (template.outcome === "ignore") {
+    return { kind: "ignore", reason: `learned template ${template.id}` };
+  }
+
+  // Named groups are preferred; positional indexes exist only for hand-written rows.
+  const amountRaw = match.groups?.amount ?? (template.amount_group !== null ? match[template.amount_group] : undefined);
+  if (amountRaw === undefined) return { kind: "no_match" };
+
+  const amount = parseAmount(amountRaw, template.currency);
+  if (amount === null || amount === 0) return { kind: "no_match" };
+
+  const merchantRaw =
+    match.groups?.merchant ?? (template.merchant_group !== null ? match[template.merchant_group] : undefined);
+
+  return {
+    kind: "transaction",
+    tx: {
+      // A refund reduces spending, so it is always stored negative.
+      amount_native: template.outcome === "refund" ? -Math.abs(amount) : Math.abs(amount),
+      native_currency: template.currency,
+      merchant: merchantRaw?.trim() ?? null,
+      tx_date: resolveTxDate(payload.timestamp),
+      description_raw: `${payload.title}: ${payload.text}`,
+      account_name: template.account_name,
+      card_last4: match.groups?.card ?? extractCardLast4(payload.text),
+    },
+  };
+}
+
+/**
+ * Tries every learned template for this package, most-used first.
+ * Returns `unknown` when none match, which is the only case worth escalating.
+ */
+export async function tryTemplateParser(payload: PushPayload, userId: string): Promise<ParseResult> {
+  const supabase = getSupabaseAdmin();
+
+  const { data: templates, error } = await supabase
+    .from("push_parser_templates")
+    .select(TEMPLATE_COLUMNS)
+    .eq("user_id", userId)
+    .eq("package_name", payload.packageName)
+    .order("hit_count", { ascending: false });
+
+  if (error) {
+    console.error(`[llm-fallback] template query failed for ${payload.packageName}:`, error.message);
+    return { kind: "unknown" };
+  }
+  if (!templates || templates.length === 0) return { kind: "unknown" };
+
+  for (const template of templates as ParserTemplate[]) {
+    const extraction = applyTemplate(template, payload);
+    if (extraction.kind === "no_match") continue;
+
+    // hit_count is selected, so the counter actually advances: it used to be
+    // omitted from the select and rewritten as (undefined ?? 0) + 1 = 1 forever,
+    // which hid the fact that no template had ever matched anything.
+    const { error: hitError } = await supabase
+      .from("push_parser_templates")
+      .update({ hit_count: template.hit_count + 1, last_hit_at: new Date().toISOString() })
+      .eq("id", template.id);
+    if (hitError) {
+      console.error(`[llm-fallback] hit_count update failed for template ${template.id}:`, hitError.message);
+    }
+
+    return extraction.kind === "ignore"
+      ? { kind: "ignore", reason: extraction.reason }
+      : { kind: "transaction", tx: extraction.tx };
+  }
+
+  return { kind: "unknown" };
+}
+
+// --- LLM fallback ------------------------------------------------------------
+
+/**
+ * What the model is allowed to tell us. Every field is a claim to be verified,
+ * not a value to be stored — except `merchant`, which is free text either way.
+ */
+const llmExtractionSchema = z.object({
+  understood: z.boolean(),
+  is_transaction: z.boolean(),
+  is_refund: z.boolean(),
+  reason: z.string().max(200),
+  /** The amount exactly as it appears in the notification, e.g. "$8.55". */
+  amount_text: z.string().max(40).nullable(),
+  currency: z.string().max(5).nullable(),
+  merchant: z.string().max(200).nullable(),
+  /** Must be one of the account names we sent, or null. */
+  account_name: z.string().max(120).nullable(),
+  /** Regex with a named `amount` group, optionally `merchant` and `card`. */
+  text_regex: z.string().max(MAX_PATTERN_LENGTH).nullable(),
+});
+
+type LlmExtraction = z.infer<typeof llmExtractionSchema>;
+
+function buildPrompt(payload: PushPayload, accounts: readonly AccountCandidate[], knownPatterns: string[]): string {
+  const accountList = accounts
+    .map((a) => `- "${a.name}" (${a.native_currency}${a.card_digits.length ? `, cards ${a.card_digits.join("/")}` : ""})`)
+    .join("\n");
+
+  const patternList = knownPatterns.length
+    ? knownPatterns.map((p) => `- ${p}`).join("\n")
+    : "- (none yet)";
+
+  return `You are converting an Android notification into structured data for a personal finance app.
+
+Notification
+  package: ${payload.packageName}
+  title:   ${payload.title}
+  text:    ${payload.text}
+
+The user's accounts (choose account_name from this list EXACTLY, or null):
+${accountList}
+
+Patterns already learned for this package (write a NEW pattern only if none of these fit):
+${patternList}
+
+Rules — a violation makes the whole answer unusable:
+1. Never compute or reformat the amount. Copy it into "amount_text" exactly as
+   it appears in the text, including separators and symbol (e.g. "$8.55",
+   "COP7,525.00", "ARS23.280,00", "-COP124,414.00").
+2. Set is_transaction=false for anything that must NOT become an expense:
+   declined or rejected purchases, delivery/shipping updates, promotions, login
+   alerts, price alerts, incoming transfers, balance updates. Explain in "reason".
+3. Set is_refund=true only for a reimbursement/refund/chargeback.
+4. Set understood=false if you cannot tell what the notification is. Do not guess.
+5. "currency" must be an ISO code (USD, COP, ARS, EUR, USDT...) or null if the
+   text only shows a bare "$" and you cannot tell.
+6. "text_regex" must match this notification's text and expose the amount as a
+   named group: (?<amount>...). Optionally (?<merchant>...) and (?<card>\\d{4}).
+   It must be general enough for the next notification of the same format
+   (do not hardcode this merchant or this amount) and specific enough not to
+   match a different format. Use null if you cannot write one.
+
+Respond with JSON only:
+{"understood":bool,"is_transaction":bool,"is_refund":bool,"reason":string,
+ "amount_text":string|null,"currency":string|null,"merchant":string|null,
+ "account_name":string|null,"text_regex":string|null}`;
+}
+
+async function callOpenAi(prompt: string, apiKey: string): Promise<unknown | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: "gpt-5.4-mini",
+        model: OPENAI_MODEL,
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
         response_format: { type: "json_object" },
       }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -162,96 +273,230 @@ Respond in JSON only:
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-
-    const extraction: LlmExtraction = JSON.parse(content);
-
-    // Not an expense — skip and save template so we don't call LLM again for this format
-    if (!extraction.is_expense || !extraction.amount) {
-      if (extraction.text_regex) {
-        await saveTemplate(payload.packageName, extraction, false);
-      }
-      return null;
-    }
-
-    // Save template for future use
-    if (extraction.text_regex) {
-      await saveTemplate(payload.packageName, extraction, true);
-    }
-
-    return {
-      amount_native: extraction.amount,
-      native_currency: extraction.currency,
-      merchant: extraction.merchant,
-      tx_date: resolveTxDate(payload.timestamp),
-      description_raw: `${payload.title}: ${payload.text}`,
-      account_name: extraction.account_name,
-    };
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") return null;
+    return JSON.parse(content);
   } catch (e) {
-    console.error("[llm-fallback] error:", e);
+    console.error("[llm-fallback] OpenAI request failed:", e instanceof Error ? e.message : e);
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-/** Save the LLM-suggested regex as a template in the DB */
-async function saveTemplate(packageName: string, extraction: LlmExtraction, isExpense: boolean): Promise<void> {
-  if (!extraction.text_regex) return;
+/**
+ * Asks the model to structure an unrecognized notification, verifies every
+ * claim it makes, and — if the extraction holds up — persists a self-verified
+ * template so the next notification of this format needs no AI call.
+ */
+export async function llmFallbackParser(
+  payload: PushPayload,
+  userId: string,
+  accounts: readonly AccountCandidate[],
+): Promise<ParseResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.log("[llm-fallback] OPENAI_API_KEY not set, skipping");
+    return { kind: "unknown" };
+  }
 
-  // Validate the regex is actually valid
-  try {
-    new RegExp(extraction.text_regex, "i");
-  } catch {
-    console.log("[llm-fallback] invalid regex suggested:", extraction.text_regex);
+  const knownPatterns = await loadKnownPatterns(userId, payload.packageName);
+  const raw = await callOpenAi(buildPrompt(payload, accounts, knownPatterns), apiKey);
+  if (raw === null) return { kind: "unknown" };
+
+  const parsed = llmExtractionSchema.safeParse(raw);
+  if (!parsed.success) {
+    console.error("[llm-fallback] response failed schema validation:", parsed.error.message);
+    return { kind: "unknown" };
+  }
+  const extraction = parsed.data;
+
+  if (!extraction.understood) {
+    console.log(`[llm-fallback] model could not classify ${payload.packageName}: ${extraction.reason}`);
+    return { kind: "unknown" };
+  }
+
+  if (!extraction.is_transaction) {
+    await saveTemplate(payload, userId, extraction, { outcome: "ignore" });
+    return { kind: "ignore", reason: extraction.reason || "classified as non-transactional by AI" };
+  }
+
+  const verified = verifyExtraction(payload, extraction, accounts);
+  if (!verified) return { kind: "unknown" };
+
+  const outcome: TemplateOutcome = extraction.is_refund ? "refund" : "expense";
+  await saveTemplate(payload, userId, extraction, { outcome, expected: verified });
+
+  return { kind: "transaction", tx: verified };
+}
+
+/**
+ * Turns the model's claims into a transaction, rejecting the whole extraction if
+ * any claim fails. The amount is re-derived here; the model's own arithmetic is
+ * never used.
+ */
+function verifyExtraction(
+  payload: PushPayload,
+  extraction: LlmExtraction,
+  accounts: readonly AccountCandidate[],
+): ParsedTransaction | null {
+  const { amount_text: amountText } = extraction;
+  if (amountText === null || amountText.trim() === "") {
+    console.error("[llm-fallback] transaction reported without an amount");
+    return null;
+  }
+
+  // Anti-hallucination: the quote has to be in the notification we sent.
+  const haystack = `${payload.title} ${payload.text}`;
+  if (!haystack.includes(amountText.trim())) {
+    console.error(`[llm-fallback] amount_text "${amountText}" does not appear in the notification`);
+    return null;
+  }
+
+  const currency = extraction.currency?.toUpperCase() ?? null;
+  if (currency !== null && !isKnownCurrency(currency)) {
+    console.error(`[llm-fallback] unknown currency: ${currency}`);
+    return null;
+  }
+
+  const amount = parseAmount(amountText, currency);
+  if (amount === null || amount === 0) {
+    console.error(`[llm-fallback] could not parse amount_text "${amountText}"`);
+    return null;
+  }
+
+  // The model may only name an account that exists.
+  const claimedName = extraction.account_name?.trim() ?? null;
+  const accountName =
+    claimedName !== null && accounts.some((a) => a.name === claimedName) ? claimedName : null;
+  if (claimedName !== null && accountName === null) {
+    console.error(`[llm-fallback] discarding invented account name: ${claimedName}`);
+  }
+
+  return {
+    amount_native: extraction.is_refund ? -Math.abs(amount) : Math.abs(amount),
+    native_currency: currency,
+    merchant: extraction.merchant?.trim() || null,
+    tx_date: resolveTxDate(payload.timestamp),
+    description_raw: `${payload.title}: ${payload.text}`,
+    // Falls back to the card digits in the text, which the resolver trusts most.
+    account_name: accountName ?? "",
+    card_last4: extractCardLast4(payload.text),
+  };
+}
+
+async function loadKnownPatterns(userId: string, packageName: string): Promise<string[]> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("push_parser_templates")
+    .select("text_pattern")
+    .eq("user_id", userId)
+    .eq("package_name", packageName);
+
+  if (error) {
+    console.error(`[llm-fallback] could not load known patterns for ${packageName}:`, error.message);
+    return [];
+  }
+  return (data ?? []).map((row: { text_pattern: string }) => row.text_pattern);
+}
+
+/**
+ * Persists an AI-authored pattern, but only after replaying it through
+ * `applyTemplate` over the notification it was learned from and confirming it
+ * reproduces the same extraction. A template that cannot parse its own source
+ * text would silently cost an AI call on every future notification.
+ */
+async function saveTemplate(
+  payload: PushPayload,
+  userId: string,
+  extraction: LlmExtraction,
+  target: { outcome: TemplateOutcome; expected?: ParsedTransaction },
+): Promise<void> {
+  const pattern = extraction.text_regex;
+  if (pattern === null || pattern.trim() === "") return;
+
+  if (target.outcome !== "ignore" && !RE_HAS_AMOUNT_GROUP.test(pattern)) {
+    console.log(`[llm-fallback] rejecting pattern without a named amount group: ${pattern}`);
     return;
+  }
+  if (compilePattern(pattern) === null) {
+    console.log(`[llm-fallback] rejecting unsafe or invalid pattern: ${pattern}`);
+    return;
+  }
+
+  const currency = extraction.currency?.toUpperCase() ?? null;
+  if (target.outcome !== "ignore" && (currency === null || !isKnownCurrency(currency))) {
+    // Without a currency the template cannot parse amounts safely; this
+    // notification is still returned, it just does not become a template.
+    console.log("[llm-fallback] not storing template: currency undetermined");
+    return;
+  }
+
+  const candidate: ParserTemplate = {
+    id: "candidate",
+    text_pattern: pattern,
+    title_pattern: null,
+    amount_group: null,
+    merchant_group: null,
+    currency: currency ?? "",
+    account_name: target.expected?.account_name ?? extraction.account_name ?? "",
+    outcome: target.outcome,
+    hit_count: 0,
+  };
+
+  const replay = applyTemplate(candidate, payload);
+  if (target.outcome === "ignore") {
+    if (replay.kind !== "ignore") {
+      console.log(`[llm-fallback] ignore template does not match its own text: ${pattern}`);
+      return;
+    }
+  } else {
+    const expected = target.expected;
+    if (replay.kind !== "transaction" || !expected) {
+      console.log(`[llm-fallback] template does not reproduce its own extraction: ${pattern}`);
+      return;
+    }
+    if (replay.tx.amount_native !== expected.amount_native) {
+      console.log(
+        `[llm-fallback] template amount mismatch (${replay.tx.amount_native} vs ${expected.amount_native}): ${pattern}`,
+      );
+      return;
+    }
   }
 
   const supabase = getSupabaseAdmin();
-
-  // Check if we already have a template with this exact pattern
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("push_parser_templates")
     .select("id")
-    .eq("user_id", OWNER_USER_ID)
-    .eq("package_name", packageName)
-    .eq("text_pattern", extraction.text_regex)
+    .eq("user_id", userId)
+    .eq("package_name", payload.packageName)
+    .eq("text_pattern", pattern)
     .limit(1);
-
-  if (existing && existing.length > 0) return; // Already saved
+  if (existingError) {
+    console.error("[llm-fallback] template lookup failed:", existingError.message);
+    return;
+  }
+  if (existing && existing.length > 0) return;
 
   const { error: insertError } = await supabase.from("push_parser_templates").insert({
-    user_id: OWNER_USER_ID,
-    package_name: packageName,
-    text_pattern: extraction.text_regex,
+    user_id: userId,
+    package_name: payload.packageName,
+    text_pattern: pattern,
     title_pattern: null,
-    amount_group: extraction.amount_group,
-    merchant_group: extraction.merchant_group,
-    currency: extraction.currency,
-    account_name: extraction.account_name,
-    is_expense: isExpense,
+    amount_group: null,
+    merchant_group: null,
+    currency: candidate.currency,
+    account_name: candidate.account_name,
+    outcome: target.outcome,
+    source_title: payload.title,
+    source_text: payload.text,
   });
   if (insertError) {
-    // Not fatal: the notification is still parsed by the LLM this time, but the
-    // template won't be reused, so every future one pays for another LLM call.
-    console.error(`[llm-fallback] template insert failed for ${packageName}:`, insertError.message);
+    // Not fatal: this notification was still parsed, but every future one of the
+    // same format will pay for another AI call.
+    console.error(`[llm-fallback] template insert failed for ${payload.packageName}:`, insertError.message);
     return;
   }
 
-  console.log(`[llm-fallback] saved template for ${packageName}: ${extraction.text_regex}`);
-}
-
-// --- Helpers ---
-
-function parseAmount(raw: string): number {
-  // Handle various formats: "33.300" (CO dots=thousands), "17,50" (comma decimal), "827583"
-  const cleaned = raw.replace(/\s/g, "");
-  // If has dots but no comma → dots are thousands (Colombian)
-  if (cleaned.includes(".") && !cleaned.includes(",")) {
-    return parseFloat(cleaned.replace(/\./g, ""));
-  }
-  // If has comma → comma is decimal separator
-  if (cleaned.includes(",")) {
-    return parseFloat(cleaned.replace(/\./g, "").replace(",", "."));
-  }
-  return parseFloat(cleaned);
+  console.log(`[llm-fallback] learned ${target.outcome} template for ${payload.packageName}: ${pattern}`);
 }

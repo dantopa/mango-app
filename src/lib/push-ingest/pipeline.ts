@@ -1,4 +1,4 @@
-import type { PushPayload, PipelineResult, IngestMode } from "./types";
+import type { PushPayload, PipelineResult, IngestMode, ParseResult } from "./types";
 import { computeDedupKey, isDuplicate } from "./dedup";
 import { getParser } from "./parser-registry";
 import { resolveRate, calculateUsd } from "./fx";
@@ -9,6 +9,9 @@ import { computeSemaphore } from "./semaphore";
 import { checkAndAlert } from "./alert";
 import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
+import { resolveAccount, type AccountCandidate } from "./account-resolver";
+import { epochToLocalDate, TZ_OFFSETS } from "./dates";
+import { validateParsedTransaction, type ResolvedTransaction } from "./validate";
 import { resolveDuplicate } from "../sync/dedup-core";
 import type { DedupCandidate } from "../sync/dedup-core";
 import type { Database } from "../supabase/database.types";
@@ -17,8 +20,22 @@ import "./parsers"; // side-effect: registers all parsers
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
+const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
+
+/** Postgres unique_violation — the dedup key was already claimed. */
+const PG_UNIQUE_VIOLATION = "23505";
+
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 type IngestLogPatch = Database["public"]["Tables"]["push_ingest_log"]["Update"];
+type IngestLogInsert = Database["public"]["Tables"]["push_ingest_log"]["Insert"];
+
+export type PipelineOptions = {
+  /**
+   * How far back a transaction may be dated. Widened when reprocessing raw logs
+   * recorded weeks ago; the default is the live-ingest window.
+   */
+  maxPastDays?: number;
+};
 
 /**
  * Patches the ingest log row for a dedup key, logging the error instead of
@@ -39,52 +56,117 @@ async function patchIngestLog(
   }
 }
 
-export async function executePipeline(payload: PushPayload, mode: IngestMode): Promise<PipelineResult> {
+/**
+ * Claims a notification by inserting its ingest-log row.
+ *
+ * `dedup_key` is the primary key, so this insert *is* the lock: if two requests
+ * carry the same notification (the forwarder retries, or a cron overlaps a
+ * webhook), exactly one insert succeeds and the loser stops here. The earlier
+ * read-then-write check left a window in which both sides inserted the same
+ * expense twice.
+ */
+async function claimIngest(
+  supabase: SupabaseAdmin,
+  row: IngestLogInsert,
+): Promise<"claimed" | "already_claimed"> {
+  const { error } = await supabase.from("push_ingest_log").insert(row);
+  if (!error) return "claimed";
+
+  if (error.code === PG_UNIQUE_VIOLATION) return "already_claimed";
+
+  // Any other failure means the row is missing and later status patches will be
+  // no-ops, so the notification would go untracked. Log loudly and keep going:
+  // registering the expense matters more than logging it.
+  console.error(`[push-ingest][log] insert failed for ${row.dedup_key}:`, error.message);
+  return "claimed";
+}
+
+async function fetchAccounts(supabase: SupabaseAdmin, userId: string): Promise<AccountCandidate[]> {
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id, name, native_currency, card_digits")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+
+  if (error) {
+    console.error("[push-ingest] accounts query failed:", error.message);
+    return [];
+  }
+  return (data ?? []) as AccountCandidate[];
+}
+
+/** Loads the account list at most once per notification, and only if needed. */
+function accountLoader(supabase: SupabaseAdmin, userId: string): () => Promise<AccountCandidate[]> {
+  let cached: AccountCandidate[] | null = null;
+  return async () => (cached ??= await fetchAccounts(supabase, userId));
+}
+
+/**
+ * Parsing ladder: hand-written parser → learned template → AI.
+ *
+ * Each step only escalates on `unknown`. An explicit `ignore` — a declined
+ * purchase, a delivery update — ends the ladder, which is what keeps the AI from
+ * ever being asked about (and inventing an expense out of) a notification we
+ * already understand.
+ */
+async function runParsers(
+  payload: PushPayload,
+  userId: string,
+  loadAccounts: () => Promise<AccountCandidate[]>,
+): Promise<ParseResult> {
+  const parser = getParser(payload.packageName);
+  const deterministic = parser ? parser(payload) : ({ kind: "unknown" } as const);
+  if (deterministic.kind !== "unknown") return deterministic;
+
+  const fromTemplate = await tryTemplateParser(payload, userId);
+  if (fromTemplate.kind !== "unknown") return fromTemplate;
+
+  if (!shouldTryLlmFallback(payload.packageName, payload.title)) return { kind: "unknown" };
+
+  console.log(`[push-ingest] no parser/template for ${payload.packageName}, escalating to AI`);
+  return llmFallbackParser(payload, userId, await loadAccounts());
+}
+
+export async function executePipeline(
+  payload: PushPayload,
+  mode: IngestMode,
+  options: PipelineOptions = {},
+): Promise<PipelineResult> {
   // If log_only, we shouldn't even be here (caller handles), but just in case:
   if (mode === "log_only") return { status: "logged" };
 
-  // 1. Get parser for this package
-  const parser = getParser(payload.packageName);
+  const supabase = getSupabaseAdmin();
+  const loadAccounts = accountLoader(supabase, OWNER_USER_ID);
 
-  // 2. Compute dedup key and check
+  // 1. Dedup key — cheap pre-check; the authoritative gate is the insert below.
   const dedupKey = computeDedupKey(payload);
   if (await isDuplicate(dedupKey)) return { status: "duplicate", dedup_key: dedupKey };
 
-  // 3. Parse — try deterministic parser first, then template DB, then LLM fallback
-  let parsed = parser ? parser(payload) : null;
-  let isLlmFirstTime = false;
+  // 2. Parse
+  const parseResult = await runParsers(payload, OWNER_USER_ID, loadAccounts);
 
-  if (!parsed) {
-    // Try auto-learned template from DB
-    parsed = await tryTemplateParser(payload);
-  }
-
-  if (!parsed) {
-    // LLM fallback — only for packages likely to have financial content
-    if (shouldTryLlmFallback(payload.packageName, payload.title)) {
-      console.log(`[push-ingest] no parser/template for ${payload.packageName}, trying LLM fallback`);
-      parsed = await llmFallbackParser(payload);
-      if (parsed) isLlmFirstTime = true; // First time for this format
-    }
-  }
-
-  if (!parsed) {
+  if (parseResult.kind === "unknown") {
     return { status: "no_parser", package_name: payload.packageName };
   }
 
-  // 4. Insert into push_ingest_log with status "processing"
-  const supabase = getSupabaseAdmin();
-
-  // If LLM detected this for the first time, decide: known financial package → insert directly, unknown → hold for confirmation
-  if (isLlmFirstTime) {
-    // Known financial packages: trust the LLM extraction and insert directly
-    // Confirmation is only for completely unknown packages not in the whitelist
-    // (which can't happen here since we only call LLM for whitelisted packages)
-    // So: always insert directly from LLM fallback. The template is already saved.
-    console.log(`[push-ingest] LLM extracted: ${parsed.merchant} ${parsed.amount_native} ${parsed.native_currency} — inserting directly`);
+  if (parseResult.kind === "ignore") {
+    // Recorded so a retry of the same notification never re-parses it, and so
+    // the ignored volume is measurable instead of invisible.
+    const claim = await claimIngest(supabase, {
+      dedup_key: dedupKey,
+      user_id: OWNER_USER_ID,
+      package_name: payload.packageName,
+      status: "ignored",
+      error_message: parseResult.reason,
+    });
+    if (claim === "already_claimed") return { status: "duplicate", dedup_key: dedupKey };
+    return { status: "ignored", reason: parseResult.reason };
   }
 
-  const { error: logInsertError } = await supabase.from("push_ingest_log").insert({
+  const parsed = parseResult.tx;
+
+  // 3. Claim the notification before doing anything with side effects.
+  const claim = await claimIngest(supabase, {
     dedup_key: dedupKey,
     user_id: OWNER_USER_ID,
     package_name: payload.packageName,
@@ -93,49 +175,45 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     merchant: parsed.merchant,
     status: "processing",
   });
-  if (logInsertError) {
-    // Every status update below targets this row by dedup_key, so without it the
-    // whole notification goes untracked (and can be reprocessed on a retry).
-    console.error(`[push-ingest][log] insert failed for ${dedupKey}:`, logInsertError.message);
+  if (claim === "already_claimed") return { status: "duplicate", dedup_key: dedupKey };
+
+  // 4. Resolve the account. This runs before FX and before any dedup query
+  // because the account determines the currency of a bare "$", and because a
+  // notification we cannot attribute must not touch `transactions` at all.
+  const resolution = resolveAccount(await loadAccounts(), {
+    cardLast4: parsed.card_last4,
+    accountName: parsed.account_name,
+  });
+  if (!resolution.ok) {
+    await patchIngestLog(supabase, dedupKey, {
+      status: "registration_failed",
+      error_message: resolution.reason,
+    });
+    return { status: "registration_failed", error: resolution.reason };
+  }
+  const account = resolution.account;
+
+  const resolved: ResolvedTransaction = {
+    ...parsed,
+    native_currency: parsed.native_currency ?? account.native_currency,
+  };
+
+  // 5. Validate — the single gate every extraction passes, whether it came from
+  // a hand-written parser, a learned template or the AI.
+  const validation = validateParsedTransaction(resolved, {
+    today: epochToLocalDate(Date.now(), TZ_OFFSETS.BOGOTA),
+    maxPastDays: options.maxPastDays,
+  });
+  if (!validation.ok) {
+    const error = validation.errors.join("; ");
+    await patchIngestLog(supabase, dedupKey, { status: "registration_failed", error_message: error });
+    console.error(`[push-ingest][validate] rejected ${dedupKey}: ${error}`);
+    return { status: "registration_failed", error };
   }
 
-  // 4.1. PENDING cleanup — Google Wallet "PENDING" authorization removal
-  const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
-  if (
-    payload.packageName === GOOGLE_WALLET_PACKAGE &&
-    parsed.merchant &&
-    parsed.merchant.toLowerCase().includes("pending")
-  ) {
-    // Search for a recently-created transaction with same amount/currency/date
-    const { data: pendingMatches } = await supabase
-      .from("transactions")
-      .select("id")
-      .eq("user_id", OWNER_USER_ID)
-      .eq("amount_native", parsed.amount_native)
-      .eq("native_currency", parsed.native_currency)
-      .eq("tx_date", parsed.tx_date)
-      .gte("created_at", new Date(Date.now() - 120 * 60 * 1000).toISOString());
+  await patchIngestLog(supabase, dedupKey, { native_currency: resolved.native_currency });
 
-    if (pendingMatches && pendingMatches.length > 0) {
-      const deletedTxId = pendingMatches[0].id;
-      const { error: deleteError } = await supabase.from("transactions").delete().eq("id", deletedTxId);
-      if (deleteError) {
-        console.error(`[push-ingest][pending-cleanup] delete of tx=${deletedTxId} failed:`, deleteError.message);
-      }
-      await patchIngestLog(supabase, dedupKey, {
-        status: "pending_cleanup",
-        transaction_id: deletedTxId,
-      });
-      console.log(`[push-ingest][pending-cleanup] deleted pending tx=${deletedTxId}`);
-      return { status: "pending_cleanup" };
-    }
-    // No match found — still don't register the PENDING notification itself
-    await patchIngestLog(supabase, dedupKey, { status: "pending_cleanup" });
-    console.log(`[push-ingest][pending-cleanup] PENDING notification discarded, no matching tx found`);
-    return { status: "pending_cleanup" };
-  }
-
-  // 4.2. Google Wallet 3-minute echo dedup
+  // 6. Google Wallet 3-minute echo dedup
   // If same amount+currency was registered by a DIFFERENT source within 3 minutes,
   // and one of the two sides is Google Wallet, discard the current notification.
   {
@@ -144,8 +222,8 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
       .from("transactions")
       .select("id, created_at")
       .eq("user_id", OWNER_USER_ID)
-      .eq("amount_native", parsed.amount_native)
-      .eq("native_currency", parsed.native_currency)
+      .eq("amount_native", resolved.amount_native)
+      .eq("native_currency", resolved.native_currency)
       .gte("created_at", threeMinAgo);
 
     if (recentTxs && recentTxs.length > 0) {
@@ -173,20 +251,20 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     }
   }
 
-  // 5. Classify (transfer vs expense)
-  const classification = await classifyTransaction(parsed, OWNER_USER_ID);
+  // 8. Classify (transfer vs expense)
+  const classification = await classifyTransaction(resolved, OWNER_USER_ID);
   if (classification.type === "transfer") {
     await patchIngestLog(supabase, dedupKey, { status: "transfer" });
     return { status: "registered", transaction_id: "transfer-skipped" };
   }
 
-  // 6. FX conversion (moved before dedup so amount_usd is available for cross-currency matching)
-  const fxResult = await resolveRate(parsed.native_currency);
+  // 9. FX conversion (before dedup so amount_usd is available for cross-currency matching)
+  const fxResult = await resolveRate(resolved.native_currency);
   if (!fxResult.ok) {
     await patchIngestLog(supabase, dedupKey, { status: "fx_pending" });
     return { status: "fx_pending", dedup_key: dedupKey };
   }
-  const amountUsd = calculateUsd(parsed.amount_native, fxResult.rate);
+  const amountUsd = calculateUsd(resolved.amount_native, fxResult.rate);
 
   // Compute externalTs early (needed for cross-currency dedup)
   const externalTs = typeof payload.timestamp === "number"
@@ -195,23 +273,20 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
       ? payload.timestamp
       : null;
 
-  // 5.5. Cross-source dedup via unified resolveDuplicate against transactions table
+  // 10. Cross-source dedup via unified resolveDuplicate against transactions table
   const dedupCandidate: DedupCandidate = {
-    amount_native: parsed.amount_native,
-    native_currency: parsed.native_currency,
+    amount_native: resolved.amount_native,
+    native_currency: resolved.native_currency,
     amount_usd: amountUsd,
-    merchant: parsed.merchant,
-    card_last4: parsed.card_last4 ?? null,
-    tx_date: parsed.tx_date,
+    merchant: resolved.merchant,
+    card_last4: resolved.card_last4 ?? null,
+    tx_date: resolved.tx_date,
     external_ts: externalTs,
   };
 
   // Get transaction IDs already claimed by the SAME package (multiplicity guard).
   // Only exclude same-source claims — cross-source claims must remain in the
   // candidate pool so Level 2 (merchant + amount + date) can detect them as dupes.
-  // Bug fix: previously excluded ALL claimed tx IDs regardless of source, which
-  // caused cross-source duplicates (e.g., SMS + Google Wallet for the same purchase)
-  // to slip through undetected.
   const { data: claimedLogs } = await supabase
     .from("push_ingest_log")
     .select("transaction_id")
@@ -236,19 +311,19 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     console.log(`[push-ingest][dedup] discard: ${dedupDecision.reason}, matched=${dedupDecision.matchedTxId}`);
     return { status: "deduped_cross_source", kept_key: dedupDecision.matchedTxId };
   } else if (dedupDecision.action === "upgrade") {
-    // UPDATE the matched transaction in-place with the candidate's better data (Req 5.2)
-    // id remains stable — no DELETE+INSERT. description_raw included for richer context.
+    // UPDATE the matched transaction in-place with the candidate's better data.
+    // id remains stable — no DELETE+INSERT.
     const { error: upgradeError } = await supabase
       .from("transactions")
       .update({
-        merchant: parsed.merchant,
-        amount_native: parsed.amount_native,
-        native_currency: parsed.native_currency,
+        merchant: resolved.merchant,
+        amount_native: resolved.amount_native,
+        native_currency: resolved.native_currency,
         amount_usd: amountUsd,
         fx_rate_to_usd: fxResult.rate,
-        card_last4: parsed.card_last4 ?? null,
+        card_last4: resolved.card_last4 ?? null,
         external_ts: externalTs,
-        description_raw: parsed.description_raw,
+        description_raw: resolved.description_raw,
         source: "push_ingest",
       })
       .eq("id", dedupDecision.matchedTxId);
@@ -267,54 +342,35 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   }
   // action === "insert" → continue pipeline normally
 
-  // 7. Categorize (deterministic first, AI fallback)
-  const catResult = await categorize(parsed.merchant, OWNER_USER_ID);
+  // 11. Categorize (deterministic first, AI fallback)
+  const catResult = await categorize(resolved.merchant, OWNER_USER_ID);
   let categoryId: string | null = null;
   let catMatched = false;
 
   if (catResult.matched) {
     categoryId = catResult.category_id;
     catMatched = true;
-  } else if (parsed.merchant) {
-    const aiResult = await categorizeWithAi(parsed.merchant, parsed.description_raw, OWNER_USER_ID);
+  } else if (resolved.merchant) {
+    const aiResult = await categorizeWithAi(resolved.merchant, resolved.description_raw, OWNER_USER_ID);
     if (aiResult.matched) {
       categoryId = aiResult.category_id;
       catMatched = true;
     }
   }
 
-  const needsReviewCategorization = !catMatched || classification.type === "unknown";
-  // Merge: review if dedup said so OR categorization couldn't resolve
-  if (needsReviewCategorization) needsReview = true;
+  if (!catMatched || classification.type === "unknown") needsReview = true;
 
-  // 8. Resolve account
-  const { data: accounts } = await supabase
-    .from("accounts")
-    .select("id, name")
-    .eq("user_id", OWNER_USER_ID);
-  const account = (accounts ?? []).find(
-    (a: { id: string; name: string }) => a.name.toLowerCase() === parsed.account_name.toLowerCase(),
-  );
-  if (!account) {
-    await patchIngestLog(supabase, dedupKey, {
-      status: "registration_failed",
-      error_message: `Account not found: ${parsed.account_name}`,
-    });
-    return { status: "registration_failed", error: `Account not found: ${parsed.account_name}` };
-  }
-
-  // 9. Insert transaction
-
+  // 12. Insert transaction
   const { data: txData, error: txError } = await supabase
     .from("transactions")
     .insert({
       user_id: OWNER_USER_ID,
       account_id: account.id,
-      tx_date: parsed.tx_date,
-      description_raw: parsed.description_raw,
-      merchant: parsed.merchant,
-      amount_native: parsed.amount_native,
-      native_currency: parsed.native_currency,
+      tx_date: resolved.tx_date,
+      description_raw: resolved.description_raw,
+      merchant: resolved.merchant,
+      amount_native: resolved.amount_native,
+      native_currency: resolved.native_currency,
       fx_rate_to_usd: fxResult.rate,
       amount_usd: amountUsd,
       category_id: categoryId,
@@ -323,7 +379,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
       source: "push_ingest",
       country: "CO", // Default for now
       expense_type: "variable",
-      card_last4: parsed.card_last4 ?? null,
+      card_last4: resolved.card_last4 ?? null,
       external_ts: externalTs,
     })
     .select("id")
@@ -338,14 +394,14 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     return { status: "registration_failed", error: txError?.message ?? "unknown insert error" };
   }
 
-  // 10. Update ingest log with success
+  // 13. Update ingest log with success
   await patchIngestLog(supabase, dedupKey, {
     status: "registered",
     transaction_id: txData.id,
     amount_usd: amountUsd,
   });
 
-  // 11. Evaluate semaphore and alert if state changed
+  // 14. Evaluate semaphore and alert if state changed
   let semaphoreResult = undefined;
   try {
     const now = new Date();
@@ -400,11 +456,11 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     console.error("[push-ingest][semaphore] error:", e);
   }
 
-  // 12. Send web push notification
+  // 15. Send web push notification
   try {
-    const amountFormatted = parsed.native_currency === "USD"
-      ? `US$${parsed.amount_native.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
-      : `${parsed.native_currency} ${parsed.amount_native.toLocaleString("es-CO")} (~US$${amountUsd.toFixed(2)})`;
+    const amountFormatted = resolved.native_currency === "USD"
+      ? `US$${resolved.amount_native.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+      : `${resolved.native_currency} ${resolved.amount_native.toLocaleString("es-CO")} (~US$${amountUsd.toFixed(2)})`;
 
     const semaphoreEmoji = semaphoreResult
       ? { verde: "🟢", amarillo: "🟡", rojo: "🔴" }[semaphoreResult.state]
@@ -415,7 +471,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
 
     await sendPushNotification(OWNER_USER_ID, {
       title: `💸 ${amountFormatted}`,
-      body: `${parsed.merchant ?? "Gasto"} registrado.${semaphoreText}`,
+      body: `${resolved.merchant ?? "Gasto"} registrado.${semaphoreText}`,
       tag: `tx-${txData.id}`,
       data: { url: "/gastos" },
     });

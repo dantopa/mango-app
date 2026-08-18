@@ -1,90 +1,92 @@
-import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import type { ParseResult, ParserFn, PushPayload } from "../types";
 import { resolveTxDate } from "../dates";
+import { detectCurrency, parseAmount } from "../money";
 
 /**
- * Google Wallet push notification parser.
+ * Google Wallet (tap-to-pay) push notification parser.
  *
- * Format observed from real notifications:
- * - title: merchant name (e.g. "PERGAMINO VIVA ENVIGAD", "BOLD SA*COYO TAC")
- * - text: "COP{amount} con {card_type} ••{last4}" (e.g. "COP7,500.00 con Debito Mastercard ••5685")
+ * Every format below is taken verbatim from push_raw_log:
  *
- * Amount format: COP followed by number with comma as thousands separator and dot as decimal
- * (e.g. "COP7,500.00", "COP63,400.00") — note: this is the OPPOSITE locale of Bancolombia emails!
- * Here comma = thousands, dot = decimal (US/international format).
+ *   charge   "$14.25 con Mastercard Nexo Card ••4186"
+ *   charge   "COP7,525.00 con TARJETA NEGRA RAPPICARD CO ••3679"
+ *   declined "RECHAZADO: $50.00 pagado con Signature ••9253"
+ *   refund   "Se reembolsó un importe de -COP124,414.00 en TARJETA NEGRA RAPPICARD CO ••3679"
+ *   other    "En horario: De MDE a CLO"  (boarding pass — no card, no amount)
+ *
+ * The merchant is always the notification title.
+ *
+ * Currency is whatever the text says, not a constant: this parser used to force
+ * "COP" and only matched `COP`-prefixed amounts, so every USD notification fell
+ * through to the LLM.
+ *
+ * A bare "$" is USD. Wallet always writes the ISO code for anything else — over
+ * 127 bare-"$" notifications in push_raw_log are all two-decimal amounts, and
+ * they appear on COP cards too ("$29.73 con TARJETA NEGRA RAPPICARD CO ••3679"
+ * next to 58 "COP10,200.00" ones), i.e. international purchases billed in USD.
+ * Resolving them by account currency would read $13.28 as 13 pesos.
  */
 
-const RE_AMOUNT = /COP([\d,]+\.?\d*)/i;
-const RE_CARD_DIGITS = /••(\d{4})/;
+/** What a bare "$" means in this source. */
+const DEFAULT_CURRENCY = "USD";
 
-/**
- * Parse Google Wallet amount format: COP7,500.00 → 7500.00
- * Uses comma as thousands separator, dot as decimal (international format).
- */
-function parseWalletAmount(raw: string): number {
-  // Remove commas (thousands separator) and parse as float
-  const cleaned = raw.replace(/,/g, "");
-  return parseFloat(cleaned);
-}
+/** Amount plus the card it was charged to: "<amount> con|en <label> ••1234". */
+const RE_CHARGE = /([-−]?\s*(?:COP|ARS|USD|US\$|R\$|€|\$)\s*[\d.,]+)\s+(?:con|en)\s+(.+?)\s*••(\d{4})/i;
 
-/**
- * Derive payment type from text description.
- */
-function derivePaymentType(text: string): string {
-  if (/debito/i.test(text)) return "debito";
-  if (/credito|credit/i.test(text)) return "credito";
-  return "debito"; // default
-}
+/** Google Wallet marks a declined attempt with a leading RECHAZADO/DECLINED. */
+const RE_DECLINED = /^\s*(?:RECHAZADO|DECLINED)\b/i;
+
+/** Refunds are phrased as a reimbursement and carry a negative amount. */
+const RE_REFUND = /se reembols|refunded/i;
+
+/** Any notification mentioning a card is payment-related; the rest is boarding passes and promos. */
+const RE_HAS_CARD = /••\d{4}/;
 
 /**
  * Convert epoch ms to YYYY-MM-DD in America/Bogota (UTC-5, no DST).
- * @deprecated Use `epochToLocalDate` from `../dates` directly. Kept for test compat.
+ * @deprecated Use `resolveTxDate` from `../dates` directly. Kept for test compat.
  */
 export function timestampToLocalDate(epochMs: number): string {
   return resolveTxDate(epochMs);
 }
 
-/**
- * Map card digits to account name.
- * TODO: make this configurable via Card_Account_Map
- */
-function resolveAccountName(digits: string | null, text: string): string {
-  // For now, infer from card type in text
-  if (/Black/i.test(text) || /Cred/i.test(text)) return "Rappi"; // RappiCard is the Black card
-  return "Bancolombia Ahorros"; // default for debit
-}
-
-export const googleWalletParser: ParserFn = (payload: PushPayload): ParsedTransaction | null => {
+export const googleWalletParser: ParserFn = (payload: PushPayload): ParseResult => {
   const { title, text } = payload;
 
-  // Extract amount from text
-  const amountMatch = text.match(RE_AMOUNT);
-  if (!amountMatch) return null; // Not a payment notification (could be promo)
+  if (RE_DECLINED.test(text)) {
+    return { kind: "ignore", reason: "declined payment" };
+  }
 
-  const amount = parseWalletAmount(amountMatch[1]);
-  if (amount <= 0 || !isFinite(amount)) return null;
+  const match = text.match(RE_CHARGE);
+  if (!match) {
+    // A card in the text means we should have understood it: escalate. Anything
+    // else is a boarding pass, an event ticket or a promo.
+    return RE_HAS_CARD.test(text)
+      ? { kind: "unknown" }
+      : { kind: "ignore", reason: "not a payment notification" };
+  }
 
-  // Merchant is in the title
-  const merchant = title?.trim() || null;
+  const [, amountRaw, cardLabel, cardDigits] = match;
+  const currency = detectCurrency(amountRaw) ?? DEFAULT_CURRENCY;
+  const amount = parseAmount(amountRaw, currency);
+  if (amount === null || amount === 0) return { kind: "unknown" };
 
-  // Card digits
-  const cardMatch = text.match(RE_CARD_DIGITS);
-  const cardDigits = cardMatch ? cardMatch[1] : null;
-
-  // Account name from card type in text
-  const accountName = resolveAccountName(cardDigits, text);
-
-  // Date: use postedAt from payload, converted to America/Bogota (UTC-5, no DST).
-  // On Vercel the server clock is UTC, so a notification at 20:30 Bogotá (01:30 UTC next day)
-  // would register the wrong date if we used getFullYear/getMonth/getDate directly.
-  const txDate = resolveTxDate(payload.timestamp);
+  const isRefund = RE_REFUND.test(text);
+  // A refund reduces spending, so it is stored negative regardless of how the
+  // notification signs it; a charge is always positive.
+  const signedAmount = isRefund ? -Math.abs(amount) : Math.abs(amount);
 
   return {
-    amount_native: amount,
-    native_currency: "COP",
-    merchant,
-    tx_date: txDate,
-    description_raw: `${title} - ${text}`,
-    account_name: accountName,
-    card_last4: cardDigits,
+    kind: "transaction",
+    tx: {
+      amount_native: signedAmount,
+      native_currency: currency,
+      merchant: title?.trim() || null,
+      // Bogotá (UTC-5): on Vercel the clock is UTC, so a 20:30 purchase would
+      // otherwise be dated the next day.
+      tx_date: resolveTxDate(payload.timestamp),
+      description_raw: `${title} - ${text}`,
+      account_name: cardLabel.trim(),
+      card_last4: cardDigits,
+    },
   };
 };

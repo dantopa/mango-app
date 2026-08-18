@@ -5,6 +5,7 @@ import { resolveRate, calculateUsd } from "@/lib/push-ingest/fx";
 import { categorize } from "@/lib/push-ingest/categorizer";
 import { categorizeWithAi } from "@/lib/push-ingest/ai-categorizer";
 import { classifyTransaction } from "@/lib/push-ingest/classifier";
+import { resolveAccount, type AccountCandidate } from "@/lib/push-ingest/account-resolver";
 import type { ParsedTransaction } from "@/lib/push-ingest/types";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
@@ -56,8 +57,31 @@ export async function POST(request: Request): Promise<NextResponse> {
   // Approve — insert the transaction
   const parsed: ParsedTransaction = JSON.parse(String(entry.pending_data));
 
+  // Resolve the account first: it decides the currency of a bare "$", and a
+  // notification we cannot attribute must not reach `transactions`.
+  const { data: accounts } = await admin
+    .from("accounts")
+    .select("id, name, native_currency, card_digits")
+    .eq("user_id", OWNER_USER_ID)
+    .eq("is_active", true);
+  const resolution = resolveAccount((accounts ?? []) as AccountCandidate[], {
+    cardLast4: parsed.card_last4,
+    accountName: parsed.account_name,
+  });
+  if (!resolution.ok) {
+    const { error } = await admin.from("push_ingest_log")
+      .update({ status: "registration_failed", error_message: resolution.reason })
+      .eq("dedup_key", dedup_key);
+    if (error) {
+      console.error(`[push-ingest][confirm] registration_failed update failed for ${dedup_key}:`, error.message);
+    }
+    return NextResponse.json({ error: resolution.reason }, { status: 400 });
+  }
+  const account = resolution.account;
+  const nativeCurrency = parsed.native_currency ?? account.native_currency;
+
   // FX
-  const fxResult = await resolveRate(parsed.native_currency);
+  const fxResult = await resolveRate(nativeCurrency);
   if (!fxResult.ok) {
     const { error } = await admin.from("push_ingest_log").update({ status: "fx_pending" }).eq("dedup_key", dedup_key);
     if (error) {
@@ -87,24 +111,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (aiResult.matched) categoryId = aiResult.category_id;
   }
 
-  // Resolve account
-  const { data: accounts } = await admin
-    .from("accounts")
-    .select("id, name")
-    .eq("user_id", OWNER_USER_ID);
-  const account = (accounts ?? []).find(
-    (a: { id: string; name: string }) => a.name.toLowerCase() === parsed.account_name.toLowerCase(),
-  );
-  if (!account) {
-    const { error } = await admin.from("push_ingest_log")
-      .update({ status: "registration_failed", error_message: `Account not found: ${parsed.account_name}` })
-      .eq("dedup_key", dedup_key);
-    if (error) {
-      console.error(`[push-ingest][confirm] registration_failed update failed for ${dedup_key}:`, error.message);
-    }
-    return NextResponse.json({ error: `Account not found: ${parsed.account_name}` }, { status: 400 });
-  }
-
   // Insert transaction
   const { data: txData, error: txError } = await admin
     .from("transactions")
@@ -115,7 +121,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       description_raw: parsed.description_raw,
       merchant: parsed.merchant,
       amount_native: parsed.amount_native,
-      native_currency: parsed.native_currency,
+      native_currency: nativeCurrency,
       fx_rate_to_usd: fxResult.rate,
       amount_usd: amountUsd,
       category_id: categoryId,

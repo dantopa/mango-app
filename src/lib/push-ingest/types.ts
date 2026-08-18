@@ -11,8 +11,14 @@ export type PushPayload = {
 
 /** Resultado de un parser exitoso */
 export type ParsedTransaction = {
+  /** Positivo = gasto, negativo = devolución. */
   amount_native: number;
-  native_currency: string; // "COP" | "USD" | "USDT" | etc
+  /**
+   * "COP" | "USD" | "USDT" | etc. `null` cuando la notificación usa un "$" sin
+   * código: el mismo símbolo es COP en la tarjeta de Rappi y USD en la de Nexo,
+   * así que lo resuelve el pipeline con la moneda de la cuenta.
+   */
+  native_currency: string | null;
   merchant: string | null;
   tx_date: string; // YYYY-MM-DD
   description_raw: string;
@@ -20,8 +26,26 @@ export type ParsedTransaction = {
   card_last4?: string | null; // últimos 4 dígitos de la tarjeta — clave de dedup
 };
 
+/**
+ * Resultado de un parser.
+ *
+ * La distinción entre `ignore` y `unknown` es la que faltaba: devolver `null`
+ * para "esto es una compra rechazada" era indistinguible de "no entiendo este
+ * formato", así que el fallback de IA pisaba rechazos correctos e inventaba
+ * gastos (49 de ~55 notificaciones de BBVA eran "Compra rechazada").
+ *
+ * Sólo `unknown` escala a la IA.
+ */
+export type ParseResult =
+  /** Entendido y hay que registrarlo. `amount_native` negativo = devolución. */
+  | { kind: "transaction"; tx: ParsedTransaction }
+  /** Entendido y NO hay que registrarlo (rechazo, promo, delivery, ingreso). */
+  | { kind: "ignore"; reason: string }
+  /** Formato no reconocido: único caso que vale escalar a la IA. */
+  | { kind: "unknown" };
+
 /** Tipo de función parser */
-export type ParserFn = (payload: PushPayload) => ParsedTransaction | null;
+export type ParserFn = (payload: PushPayload) => ParseResult;
 
 /** Estado del semáforo */
 export type SemaphoreState = "verde" | "amarillo" | "rojo";
@@ -42,12 +66,12 @@ export type PipelineResult =
   | { status: "logged" }
   | { status: "duplicate"; dedup_key: string }
   | { status: "no_parser"; package_name: string }
+  | { status: "ignored"; reason: string }
   | { status: "registered"; transaction_id: string; semaphore?: SemaphoreResult }
   | { status: "fx_pending"; dedup_key: string }
   | { status: "deduped_cross_source"; kept_key: string }
   | { status: "registration_failed"; error: string }
   | { status: "pending_confirmation"; dedup_key: string; merchant: string | null; amount: number; currency: string }
-  | { status: "pending_cleanup" }
   | { status: "deduped_wallet_echo" };
 
 /** Modos de operación */

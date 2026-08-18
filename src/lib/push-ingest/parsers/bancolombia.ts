@@ -1,4 +1,4 @@
-import type { ParsedTransaction, ParserFn, PushPayload } from "../types";
+import type { ParseResult, ParserFn, PushPayload } from "../types";
 import { resolveTxDate, TZ_OFFSETS } from "../dates";
 import { parseCopAmount, normalizeDate } from "@/lib/sync/gmail/money";
 
@@ -23,23 +23,10 @@ const RE_CARD_DIGITS = /\*(\d{4})\b/;
 const RE_DATE = /(\d{2}\/\d{2}\/\d{2,4})/;
 
 /**
- * Derive payment type from text.
+ * Every Bancolombia notification observed so far comes from the same account;
+ * `card_last4` is what disambiguates it downstream if that ever stops holding.
  */
-function derivePaymentType(text: string): string {
-  if (/T\.Deb/i.test(text)) return "debito";
-  if (/T\.Cred/i.test(text)) return "credito";
-  if (/codigo QR/i.test(text)) return "pse_qr";
-  if (RE_TRANSFERENCIA.test(text)) return "transferencia";
-  return "otro";
-}
-
-/**
- * Map card digits to account name.
- * For now all cards default to "Bancolombia Ahorros".
- */
-function resolveAccountName(_digits: string | null): string {
-  return "Bancolombia Ahorros";
-}
+const ACCOUNT_NAME = "Bancolombia Ahorros";
 
 /**
  * Extract amount from text. Returns null if no amount found.
@@ -85,21 +72,19 @@ function extractDestinationFromTransfer(text: string): string | null {
  * Handles: COMPRA, PAGO_QR, PAGO_SERVICIO, TRANSFERENCIA.
  * Ignores: ENTRADA (not an expense).
  */
-export const bancolombiaParser: ParserFn = (payload: PushPayload): ParsedTransaction | null => {
+export const bancolombiaParser: ParserFn = (payload: PushPayload): ParseResult => {
   const text = payload.text;
 
   // 1. Classification — ordered most specific first
   if (RE_ENTRADA.test(text)) {
-    // Income — not an expense
-    return null;
+    return { kind: "ignore", reason: "incoming transfer, not an expense" };
   }
 
   const amount = extractAmount(text);
-  if (amount === null || amount <= 0) return null;
+  if (amount === null || amount <= 0) return { kind: "unknown" };
 
   const cardDigitsMatch = text.match(RE_CARD_DIGITS);
   const cardDigits = cardDigitsMatch ? cardDigitsMatch[1] : null;
-  const accountName = resolveAccountName(cardDigits);
 
   const dateMatch = text.match(RE_DATE);
   let txDate: string;
@@ -122,16 +107,20 @@ export const bancolombiaParser: ParserFn = (payload: PushPayload): ParsedTransac
   } else if (RE_TRANSFERENCIA.test(text)) {
     merchant = extractDestinationFromTransfer(text);
   } else {
-    // No classification matched
-    return null;
+    // Has an amount but no recognized operation type — worth escalating.
+    return { kind: "unknown" };
   }
 
   return {
-    amount_native: amount,
-    native_currency: "COP",
-    merchant,
-    tx_date: txDate,
-    description_raw: text,
-    account_name: accountName,
+    kind: "transaction",
+    tx: {
+      amount_native: amount,
+      native_currency: "COP",
+      merchant,
+      tx_date: txDate,
+      description_raw: text,
+      account_name: ACCOUNT_NAME,
+      card_last4: cardDigits,
+    },
   };
 };

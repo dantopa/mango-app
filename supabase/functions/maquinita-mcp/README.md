@@ -22,17 +22,22 @@ Pasá el secret como query param o header:
 - Query: `...maquinita-mcp?key=EL_SECRET`
 - Header: `x-maquinita-key: EL_SECRET`
 
-Secret por defecto: `mqnt_3f9aK7Qe2hV8sLpZ1xR6yTbN4wD0cJ5`
-Para rotarlo, definí el secret de función **`MAQUINITA_MCP_SECRET`** en
-*Supabase → Edge Functions → maquinita-mcp → Secrets* y redeployá. Igual para el
-dueño: **`MAQUINITA_OWNER_USER_ID`** (hoy apunta al usuario demo).
+El secret **no tiene default**: vive sólo en el secret de función
+**`MAQUINITA_MCP_SECRET`** (*Supabase → Edge Functions → Secrets*). Si no está
+seteado, la función rechaza todo con 401 — esta función usa la service-role key,
+así que un default en el código sería una credencial pública. Nunca lo pegues en
+este archivo ni en un commit. Igual para el dueño: **`MAQUINITA_OWNER_USER_ID`**
+(hoy apunta al usuario demo).
+
+Para rotarlo: `supabase secrets set MAQUINITA_MCP_SECRET=... --project-ref ixvxunclnbzguugiqelq`
+y actualizá la URL del connector.
 
 ## Conectarlo a Claude (custom connector)
 
 claude.ai → **Settings → Connectors → Add custom connector**:
 
 - Nombre: `Maquinita`
-- URL: `https://ixvxunclnbzguugiqelq.supabase.co/functions/v1/maquinita-mcp?key=mqnt_3f9aK7Qe2hV8sLpZ1xR6yTbN4wD0cJ5`
+- URL: `https://ixvxunclnbzguugiqelq.supabase.co/functions/v1/maquinita-mcp?key=<MAQUINITA_MCP_SECRET>`
 
 No usa OAuth: el secret va en la URL, así que conecta como *no-auth connector*.
 
