@@ -28,12 +28,10 @@ export default function SettingsPage() {
     setLogs((prev) => [...prev, `[${timestamp()}] ${msg}`]);
   }, []);
 
-  // Check SW registration state on mount
+  // Check SW registration state on mount. Lack of support already surfaces in
+  // the status badges, so nothing is logged on the early return.
   useEffect(() => {
-    if (!("serviceWorker" in navigator)) {
-      addLog("❌ Service Worker no soportado en este navegador");
-      return;
-    }
+    if (!("serviceWorker" in navigator)) return;
 
     navigator.serviceWorker.getRegistration().then((reg) => {
       if (reg) {
@@ -65,15 +63,8 @@ export default function SettingsPage() {
     });
   }, [addLog]);
 
-  // Log permission state
-  useEffect(() => {
-    addLog(`🔔 Permiso de notificaciones: ${permission}`);
-  }, [permission, addLog]);
-
-  // Log subscription state
-  useEffect(() => {
-    addLog(`📬 Subscripción push: ${isSubscribed ? "activa" : "inactiva"}`);
-  }, [isSubscribed, addLog]);
+  // `permission` and `isSubscribed` are rendered live in the status badges
+  // below, so the log only records events (SW resolution and user actions).
 
   const handleToggleSubscription = async () => {
     if (isSubscribed) {

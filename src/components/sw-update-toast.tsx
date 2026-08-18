@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,25 +22,21 @@ const AUTO_DISMISS_MS = 10_000;
  * Auto-dismisses after 10 seconds if not interacted with.
  */
 export function SwUpdateToast({ visible, onReload, onDismiss }: SwUpdateToastProps) {
-  const [show, setShow] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const interactedRef = useRef(false);
 
-  useEffect(() => {
-    if (visible) {
-      setShow(true);
-      interactedRef.current = false;
-
-      timerRef.current = setTimeout(() => {
-        if (!interactedRef.current) {
-          setShow(false);
-          onDismiss();
-        }
-      }, AUTO_DISMISS_MS);
-    } else {
-      setShow(false);
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
+  };
 
+  // Auto-dismiss after 10s. Cleared on unmount, on interaction, or when the
+  // update goes away — onDismiss() flips `visible` in the parent, so there is
+  // no local copy of the visibility to keep in sync.
+  useEffect(() => {
+    if (!visible) return;
+    timerRef.current = setTimeout(onDismiss, AUTO_DISMISS_MS);
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -49,18 +45,15 @@ export function SwUpdateToast({ visible, onReload, onDismiss }: SwUpdateToastPro
     };
   }, [visible, onDismiss]);
 
-  if (!show) return null;
+  if (!visible) return null;
 
   const handleReload = () => {
-    interactedRef.current = true;
-    if (timerRef.current) clearTimeout(timerRef.current);
+    clearTimer();
     onReload();
   };
 
   const handleDismiss = () => {
-    interactedRef.current = true;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setShow(false);
+    clearTimer();
     onDismiss();
   };
 

@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { callMcpTool, McpError } from "@/lib/sync/mcp-client";
 import { adaptNexo } from "@/lib/sync/adapters/nexo";
+import type { NexoRawTx } from "@/lib/sync/adapters/nexo";
 import { processCandidates, recategorizeMonth } from "@/lib/sync/sync-engine";
 import type { SyncRequest, SyncErrorResponse } from "@/lib/sync/types";
 
@@ -86,8 +87,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Adapt
-    const candidates = adaptNexo(allRawTxs as any);
+    // 4. Adapt — the MCP response is unvalidated JSON, so the shape is asserted here.
+    const candidates = adaptNexo(allRawTxs as unknown as NexoRawTx[]);
 
     // 5. Process via sync-engine
     const result = await processCandidates(candidates, user.id, month);

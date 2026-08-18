@@ -25,7 +25,14 @@ export function usePushNotifications() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Check current state on mount
+  // Check current state on mount.
+  //
+  // These reads must happen after hydration: `navigator`/`Notification` do not
+  // exist during SSR, so seeding them via useState would make the first client
+  // render disagree with the server HTML. An effect is the correct tool here —
+  // the alternative (useSyncExternalStore) cannot express the permission
+  // updates that requestPermission() performs later in this same hook.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
       console.log("[push-debug] unsupported: SW=", "serviceWorker" in navigator, "PushManager=", "PushManager" in window);
@@ -48,6 +55,7 @@ export function usePushNotifications() {
       });
     });
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const subscribe = useCallback(async () => {
     if (!VAPID_PUBLIC_KEY) {

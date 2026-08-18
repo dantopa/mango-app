@@ -42,18 +42,46 @@ export function GoalFormDialog({
   goal: Goal | null;
   currentNetWorth: number;
 }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{goal ? "Editar objetivo" : "Nuevo objetivo"}</DialogTitle>
+          <DialogDescription>
+            Definí cuánto querés juntar y para cuándo. El progreso se mide contra tu
+            patrimonio.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Mounted only while open and keyed by goal, so the form state starts
+            fresh on every open instead of being reset from an effect. */}
+        {open && (
+          <GoalForm
+            key={goal?.id ?? "new"}
+            goal={goal}
+            currentNetWorth={currentNetWorth}
+            onOpenChange={onOpenChange}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GoalForm({
+  goal,
+  currentNetWorth,
+  onOpenChange,
+}: {
+  goal: Goal | null;
+  currentNetWorth: number;
+  onOpenChange: (open: boolean) => void;
+}) {
   const upsert = useUpsertGoal();
   const [values, setValues] = React.useState<GoalFormValues>(() =>
     toDefaults(goal, currentNetWorth),
   );
   const [errors, setErrors] = React.useState<Record<string, string>>({});
-
-  React.useEffect(() => {
-    if (open) {
-      setValues(toDefaults(goal, currentNetWorth));
-      setErrors({});
-    }
-  }, [open, goal, currentNetWorth]);
 
   function set<K extends keyof GoalFormValues>(key: K, value: GoalFormValues[K]) {
     setValues((v) => ({ ...v, [key]: value }));
@@ -75,91 +103,79 @@ export function GoalFormDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{goal ? "Editar objetivo" : "Nuevo objetivo"}</DialogTitle>
-          <DialogDescription>
-            Definí cuánto querés juntar y para cuándo. El progreso se mide contra tu
-            patrimonio.
-          </DialogDescription>
-        </DialogHeader>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <Field label="Nombre" error={errors.name}>
+        <Input
+          value={values.name}
+          onChange={(e) => set("name", e.target.value)}
+          placeholder="70k Julio 2026"
+        />
+      </Field>
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <Field label="Nombre" error={errors.name}>
-            <Input
-              value={values.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="70k Julio 2026"
-            />
-          </Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Meta (USD)" error={errors.target_usd}>
+          <Input
+            type="number"
+            inputMode="decimal"
+            value={values.target_usd || ""}
+            onChange={(e) => set("target_usd", Number(e.target.value))}
+          />
+        </Field>
+        <Field label="Fecha objetivo" error={errors.target_date}>
+          <Input
+            type="date"
+            value={values.target_date}
+            onChange={(e) => set("target_date", e.target.value)}
+          />
+        </Field>
+      </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Meta (USD)" error={errors.target_usd}>
-              <Input
-                type="number"
-                inputMode="decimal"
-                value={values.target_usd || ""}
-                onChange={(e) => set("target_usd", Number(e.target.value))}
-              />
-            </Field>
-            <Field label="Fecha objetivo" error={errors.target_date}>
-              <Input
-                type="date"
-                value={values.target_date}
-                onChange={(e) => set("target_date", e.target.value)}
-              />
-            </Field>
-          </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Patrimonio inicial (USD)" error={errors.start_usd}>
+          <Input
+            type="number"
+            inputMode="decimal"
+            value={values.start_usd || ""}
+            onChange={(e) => set("start_usd", Number(e.target.value))}
+          />
+        </Field>
+        <Field label="Fecha de inicio" error={errors.start_date}>
+          <Input
+            type="date"
+            value={values.start_date}
+            onChange={(e) => set("start_date", e.target.value)}
+          />
+        </Field>
+      </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Patrimonio inicial (USD)" error={errors.start_usd}>
-              <Input
-                type="number"
-                inputMode="decimal"
-                value={values.start_usd || ""}
-                onChange={(e) => set("start_usd", Number(e.target.value))}
-              />
-            </Field>
-            <Field label="Fecha de inicio" error={errors.start_date}>
-              <Input
-                type="date"
-                value={values.start_date}
-                onChange={(e) => set("start_date", e.target.value)}
-              />
-            </Field>
-          </div>
+      <label className="flex items-center justify-between rounded-lg border border-border p-3">
+        <span className="text-sm font-medium">Objetivo activo</span>
+        <Switch
+          checked={values.is_active}
+          onCheckedChange={(c) => set("is_active", c)}
+        />
+      </label>
 
-          <label className="flex items-center justify-between rounded-lg border border-border p-3">
-            <span className="text-sm font-medium">Objetivo activo</span>
-            <Switch
-              checked={values.is_active}
-              onCheckedChange={(c) => set("is_active", c)}
-            />
-          </label>
+      {upsert.error && (
+        <p className="text-sm text-destructive">
+          {upsert.error instanceof Error ? upsert.error.message : "Error al guardar"}
+        </p>
+      )}
 
-          {upsert.error && (
-            <p className="text-sm text-destructive">
-              {upsert.error instanceof Error ? upsert.error.message : "Error al guardar"}
-            </p>
-          )}
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={upsert.isPending}>
-              {upsert.isPending && <Loader2 className="size-4 animate-spin" />}
-              Guardar
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => onOpenChange(false)}
+        >
+          Cancelar
+        </Button>
+        <Button type="submit" disabled={upsert.isPending}>
+          {upsert.isPending && <Loader2 className="size-4 animate-spin" />}
+          Guardar
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
 

@@ -29,7 +29,10 @@ export function PendingConfirmations() {
     }
   }, []);
 
+  // Fetching on mount and polling is exactly what an effect is for: the state
+  // comes from the network, not from props, so there is nothing to derive.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPending();
     // Poll every 30s in case new ones arrive while app is open
     const interval = setInterval(fetchPending, 30_000);

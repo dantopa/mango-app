@@ -15,14 +15,17 @@ export function BudgetSettings() {
   const { data: settings, isLoading } = useSettings();
   const update = useUpdateSettings();
   const [value, setValue] = React.useState("");
+  const [syncedCeiling, setSyncedCeiling] = React.useState<number | null>(null);
   const [saved, setSaved] = React.useState(false);
 
-  // Sync input with loaded settings
-  React.useEffect(() => {
-    if (settings?.budget_ceiling_usd != null) {
-      setValue(String(settings.budget_ceiling_usd));
-    }
-  }, [settings?.budget_ceiling_usd]);
+  // Adjust the input when a newly loaded ceiling arrives. Done during render
+  // instead of in an effect (see "Adjusting some state when a prop changes" in
+  // the React docs) so there is no extra render pass.
+  const ceiling = settings?.budget_ceiling_usd ?? null;
+  if (ceiling !== null && ceiling !== syncedCeiling) {
+    setSyncedCeiling(ceiling);
+    setValue(String(ceiling));
+  }
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();

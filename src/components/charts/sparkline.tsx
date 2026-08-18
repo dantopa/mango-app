@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
 
 export function Sparkline({
@@ -9,10 +10,11 @@ export function Sparkline({
   data: { date: string; usd: number }[];
   color?: string;
 }) {
+  // useId keeps the gradient id stable across server and client renders.
+  const id = useId();
   if (data.length < 2) {
     return <div className="h-8 w-full" />;
   }
-  const id = `spark-${Math.random().toString(36).slice(2)}`;
   return (
     <ResponsiveContainer width="100%" height={32}>
       <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
