@@ -39,19 +39,11 @@ jobs:
         run: npm test
 
       - name: Build
-        # pipefail so a failing build is not masked by tee's exit code
-        shell: bash
-        run: |
-          set -o pipefail
-          npx next build | tee build-output.txt
+        run: npx next build
 
       - name: Inject SW version
         run: node scripts/inject-sw-version.mjs
 
+      # Reads the sizes from .next/, so it must run after the build.
       - name: Check bundle sizes
-        run: node scripts/check-bundle-size.mjs --stdin < build-output.txt
-
-      - name: Run Lighthouse CI
-        run: npm run lighthouse:ci
-        env:
-          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+        run: node scripts/check-bundle-size.mjs

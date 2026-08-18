@@ -34,11 +34,11 @@ module.exports = {
       },
     },
     assert: {
+      // No 'categories:pwa' — Lighthouse 12 dropped the PWA category.
       assertions: {
         'categories:performance': ['error', { minScore: 0.9, aggregationMethod: 'median-run' }],
         'categories:best-practices': ['error', { minScore: 0.95, aggregationMethod: 'median-run' }],
         'categories:accessibility': ['error', { minScore: 0.95, aggregationMethod: 'median-run' }],
-        'categories:pwa': ['error', { minScore: 0.9, aggregationMethod: 'median-run' }],
       },
     },
     upload: {
