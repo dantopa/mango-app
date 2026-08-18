@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       accounts: {
@@ -302,6 +327,7 @@ export type Database = {
           merchant: string | null
           native_currency: string | null
           package_name: string
+          pending_data: Json | null
           raw_log_id: string | null
           related_dedup_key: string | null
           status: string
@@ -318,6 +344,7 @@ export type Database = {
           merchant?: string | null
           native_currency?: string | null
           package_name: string
+          pending_data?: Json | null
           raw_log_id?: string | null
           related_dedup_key?: string | null
           status?: string
@@ -334,6 +361,7 @@ export type Database = {
           merchant?: string | null
           native_currency?: string | null
           package_name?: string
+          pending_data?: Json | null
           raw_log_id?: string | null
           related_dedup_key?: string | null
           status?: string
@@ -357,6 +385,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      push_parser_templates: {
+        Row: {
+          account_name: string
+          amount_group: number
+          created_at: string
+          currency: string
+          hit_count: number
+          id: string
+          is_expense: boolean
+          last_hit_at: string | null
+          merchant_group: number | null
+          package_name: string
+          text_pattern: string
+          title_pattern: string | null
+          user_id: string
+        }
+        Insert: {
+          account_name: string
+          amount_group?: number
+          created_at?: string
+          currency?: string
+          hit_count?: number
+          id?: string
+          is_expense?: boolean
+          last_hit_at?: string | null
+          merchant_group?: number | null
+          package_name: string
+          text_pattern: string
+          title_pattern?: string | null
+          user_id: string
+        }
+        Update: {
+          account_name?: string
+          amount_group?: number
+          created_at?: string
+          currency?: string
+          hit_count?: number
+          id?: string
+          is_expense?: boolean
+          last_hit_at?: string | null
+          merchant_group?: number | null
+          package_name?: string
+          text_pattern?: string
+          title_pattern?: string | null
+          user_id?: string
+        }
+        Relationships: []
       }
       push_raw_log: {
         Row: {
@@ -564,6 +640,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_google_secrets: {
+        Args: never
+        Returns: {
+          name: string
+          secret: string
+        }[]
+      }
       vault_get_secret: { Args: { p_name: string }; Returns: string }
       vault_read_secret: { Args: { secret_name: string }; Returns: string }
       vault_upsert_secret: {
@@ -702,6 +785,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       account_type: ["crypto", "broker", "bank", "wallet", "cash"],

@@ -41,8 +41,7 @@ interface TemplateRow {
  * Returns parsed transaction or null if no template matches.
  */
 export async function tryTemplateParser(payload: PushPayload): Promise<ParsedTransaction | null> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const supabase = getSupabaseAdmin() as any;
+  const supabase = getSupabaseAdmin();
 
   const { data: templates } = await supabase
     .from("push_parser_templates")
@@ -204,8 +203,7 @@ async function saveTemplate(packageName: string, extraction: LlmExtraction, isEx
     return;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const supabase = getSupabaseAdmin() as any;
+  const supabase = getSupabaseAdmin();
 
   // Check if we already have a template with this exact pattern
   const { data: existing } = await supabase
