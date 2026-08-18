@@ -249,6 +249,25 @@ describe("executePipeline", () => {
     }
   });
 
+  it("logs the error when the ingest log status update is rejected", async () => {
+    // Regression guard: rejected status writes used to be discarded, which is how
+    // a stale CHECK constraint kept 55 rows stuck on "processing" for two months.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockUpdateEq.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'violates check constraint "chk_ingest_status"' },
+    });
+
+    const result = await executePipeline(basePayload, "full_pipeline");
+
+    expect(result.status).toBe("registered");
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("update to status=registered failed"),
+      'violates check constraint "chk_ingest_status"',
+    );
+    consoleError.mockRestore();
+  });
+
   it("handles transfer classification (skips insertion)", async () => {
     vi.mocked(classifyTransaction).mockResolvedValue({ type: "transfer", is_payment: true });
 

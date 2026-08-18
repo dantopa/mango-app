@@ -6,6 +6,7 @@ import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
+import type { Json } from "@/lib/supabase/database.types";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
@@ -42,7 +43,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     // 5. Extract package name and check whitelist
-    const rawPayload = body as Record<string, unknown>;
+    // Came from request.json(), so every value is JSON-serializable by construction.
+    const rawPayload = body as Record<string, Json>;
     const packageName = String(rawPayload.packageName ?? rawPayload.appName ?? rawPayload.package ?? "unknown");
 
     if (!isWhitelistedPackage(packageName)) {
@@ -50,10 +52,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     // 6. Save raw log (so we never lose a whitelisted notification)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase = getSupabaseAdmin() as any;
+    const supabase = getSupabaseAdmin();
 
-    await supabase
+    const { error: rawLogError } = await supabase
       .from("push_raw_log")
       .insert({
         user_id: OWNER_USER_ID,
@@ -61,6 +62,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         payload: rawPayload,
         received_at: new Date().toISOString(),
       });
+    if (rawLogError) {
+      // The raw log is the only recovery path for a notification we fail to parse.
+      console.error(`[push-ingest] raw log insert failed for ${packageName}:`, rawLogError.message);
+    }
 
     // 7. Validate and run pipeline
     const parseResult = pushPayloadSchema.safeParse(body);

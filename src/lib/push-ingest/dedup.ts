@@ -31,9 +31,7 @@ export function computeDedupKey(payload: PushPayload): string {
  */
 export async function isDuplicate(dedupKey: string): Promise<boolean> {
   const supabase = getSupabaseAdmin();
-  // Cast needed: push_ingest_log not yet in generated database.types.ts
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from("push_ingest_log")
     .select("dedup_key")
     .eq("dedup_key", dedupKey)

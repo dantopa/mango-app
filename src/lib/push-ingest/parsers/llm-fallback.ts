@@ -79,10 +79,13 @@ export async function tryTemplateParser(payload: PushPayload): Promise<ParsedTra
       const merchant = tpl.merchant_group ? (match[tpl.merchant_group] ?? null) : null;
 
       // Update hit count
-      await supabase
+      const { error: hitError } = await supabase
         .from("push_parser_templates")
         .update({ hit_count: (tpl.hit_count ?? 0) + 1, last_hit_at: new Date().toISOString() })
         .eq("id", tpl.id);
+      if (hitError) {
+        console.error(`[llm-fallback] hit_count update failed for template ${tpl.id}:`, hitError.message);
+      }
 
       return {
         amount_native: amount,
@@ -216,7 +219,7 @@ async function saveTemplate(packageName: string, extraction: LlmExtraction, isEx
 
   if (existing && existing.length > 0) return; // Already saved
 
-  await supabase.from("push_parser_templates").insert({
+  const { error: insertError } = await supabase.from("push_parser_templates").insert({
     user_id: OWNER_USER_ID,
     package_name: packageName,
     text_pattern: extraction.text_regex,
@@ -227,6 +230,12 @@ async function saveTemplate(packageName: string, extraction: LlmExtraction, isEx
     account_name: extraction.account_name,
     is_expense: isExpense,
   });
+  if (insertError) {
+    // Not fatal: the notification is still parsed by the LLM this time, but the
+    // template won't be reused, so every future one pays for another LLM call.
+    console.error(`[llm-fallback] template insert failed for ${packageName}:`, insertError.message);
+    return;
+  }
 
   console.log(`[llm-fallback] saved template for ${packageName}: ${extraction.text_regex}`);
 }

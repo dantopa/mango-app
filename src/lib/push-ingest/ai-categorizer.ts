@@ -35,8 +35,7 @@ export async function categorizeWithAi(
   const supabase = getSupabaseAdmin();
 
   // Fetch user's categories
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: categories, error: catError } = await (supabase as any)
+  const { data: categories, error: catError } = await supabase
     .from("categories")
     .select("id, name")
     .eq("user_id", userId);
@@ -45,7 +44,7 @@ export async function categorizeWithAi(
     return { matched: false, reason: "No categories found for user" };
   }
 
-  const categoryOptions = categories as CategoryOption[];
+  const categoryOptions: CategoryOption[] = categories;
   const categoryList = categoryOptions.map((c) => c.name).join(", ");
 
   // Build the prompt
@@ -122,8 +121,7 @@ Descripción: "${descriptionRaw}"`;
     let autoRuleCreated = false;
 
     if (pattern) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: ruleError } = await (supabase as any)
+      const { error: ruleError } = await supabase
         .from("merchant_category_rules")
         .insert({
           user_id: userId,
@@ -133,7 +131,9 @@ Descripción: "${descriptionRaw}"`;
           priority: -10, // AI-generated: below manual rules (default 0) so human corrections always win
         });
 
-      if (!ruleError) {
+      if (ruleError) {
+        console.error(`[ai-categorizer] rule insert failed for "${pattern}":`, ruleError.message);
+      } else {
         autoRuleCreated = true;
         console.log(`[ai-categorizer] Created rule: "${pattern}" → ${matchedCategory.name}`);
       }

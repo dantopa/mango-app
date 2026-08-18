@@ -48,9 +48,7 @@ export async function classifyTransaction(
   userId: string,
 ): Promise<ClassificationResult> {
   const supabase = getSupabaseAdmin();
-  // Cast needed: transfer_classification_rules not yet in generated database.types.ts
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rules, error } = await (supabase as any)
+  const { data: rules, error } = await supabase
     .from("transfer_classification_rules")
     .select("id, pattern, match_type, list_type")
     .eq("user_id", userId);
@@ -60,7 +58,7 @@ export async function classifyTransaction(
     return { type: "unknown", needs_review: true };
   }
 
-  const typedRules = rules as ClassificationRule[];
+  const typedRules: ClassificationRule[] = rules;
 
   // Check text to match against: combine merchant + description
   const textsToCheck: string[] = [];

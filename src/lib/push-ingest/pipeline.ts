@@ -11,10 +11,33 @@ import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
 import { resolveDuplicate } from "../sync/dedup-core";
 import type { DedupCandidate } from "../sync/dedup-core";
+import type { Database } from "../supabase/database.types";
 import { shouldTryLlmFallback, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
 import "./parsers"; // side-effect: registers all parsers
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
+
+type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
+type IngestLogPatch = Database["public"]["Tables"]["push_ingest_log"]["Update"];
+
+/**
+ * Patches the ingest log row for a dedup key, logging the error instead of
+ * discarding it: a rejected write leaves the row on its previous status, which
+ * is how a stale CHECK constraint kept 55 rows stuck on "processing" unnoticed.
+ */
+async function patchIngestLog(
+  supabase: SupabaseAdmin,
+  dedupKey: string,
+  patch: IngestLogPatch,
+): Promise<void> {
+  const { error } = await supabase.from("push_ingest_log").update(patch).eq("dedup_key", dedupKey);
+  if (error) {
+    console.error(
+      `[push-ingest][log] update to status=${patch.status ?? "?"} failed for ${dedupKey}:`,
+      error.message,
+    );
+  }
+}
 
 export async function executePipeline(payload: PushPayload, mode: IngestMode): Promise<PipelineResult> {
   // If log_only, we shouldn't even be here (caller handles), but just in case:
@@ -50,8 +73,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   }
 
   // 4. Insert into push_ingest_log with status "processing"
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const supabase = getSupabaseAdmin() as any;
+  const supabase = getSupabaseAdmin();
 
   // If LLM detected this for the first time, decide: known financial package → insert directly, unknown → hold for confirmation
   if (isLlmFirstTime) {
@@ -62,7 +84,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     console.log(`[push-ingest] LLM extracted: ${parsed.merchant} ${parsed.amount_native} ${parsed.native_currency} — inserting directly`);
   }
 
-  await supabase.from("push_ingest_log").insert({
+  const { error: logInsertError } = await supabase.from("push_ingest_log").insert({
     dedup_key: dedupKey,
     user_id: OWNER_USER_ID,
     package_name: payload.packageName,
@@ -71,6 +93,11 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     merchant: parsed.merchant,
     status: "processing",
   });
+  if (logInsertError) {
+    // Every status update below targets this row by dedup_key, so without it the
+    // whole notification goes untracked (and can be reprocessed on a retry).
+    console.error(`[push-ingest][log] insert failed for ${dedupKey}:`, logInsertError.message);
+  }
 
   // 4.1. PENDING cleanup — Google Wallet "PENDING" authorization removal
   const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
@@ -91,18 +118,19 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
 
     if (pendingMatches && pendingMatches.length > 0) {
       const deletedTxId = pendingMatches[0].id;
-      await supabase.from("transactions").delete().eq("id", deletedTxId);
-      await supabase.from("push_ingest_log").update({
+      const { error: deleteError } = await supabase.from("transactions").delete().eq("id", deletedTxId);
+      if (deleteError) {
+        console.error(`[push-ingest][pending-cleanup] delete of tx=${deletedTxId} failed:`, deleteError.message);
+      }
+      await patchIngestLog(supabase, dedupKey, {
         status: "pending_cleanup",
         transaction_id: deletedTxId,
-      }).eq("dedup_key", dedupKey);
+      });
       console.log(`[push-ingest][pending-cleanup] deleted pending tx=${deletedTxId}`);
       return { status: "pending_cleanup" };
     }
     // No match found — still don't register the PENDING notification itself
-    await supabase.from("push_ingest_log").update({
-      status: "pending_cleanup",
-    }).eq("dedup_key", dedupKey);
+    await patchIngestLog(supabase, dedupKey, { status: "pending_cleanup" });
     console.log(`[push-ingest][pending-cleanup] PENDING notification discarded, no matching tx found`);
     return { status: "pending_cleanup" };
   }
@@ -137,9 +165,7 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
         );
 
         if (currentIsWallet || existingIsWallet) {
-          await supabase.from("push_ingest_log").update({
-            status: "deduped_wallet_echo",
-          }).eq("dedup_key", dedupKey);
+          await patchIngestLog(supabase, dedupKey, { status: "deduped_wallet_echo" });
           console.log(`[push-ingest][wallet-echo] discarded duplicate: current=${payload.packageName}, existing matched wallet echo`);
           return { status: "deduped_wallet_echo" };
         }
@@ -150,14 +176,14 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   // 5. Classify (transfer vs expense)
   const classification = await classifyTransaction(parsed, OWNER_USER_ID);
   if (classification.type === "transfer") {
-    await supabase.from("push_ingest_log").update({ status: "transfer" }).eq("dedup_key", dedupKey);
+    await patchIngestLog(supabase, dedupKey, { status: "transfer" });
     return { status: "registered", transaction_id: "transfer-skipped" };
   }
 
   // 6. FX conversion (moved before dedup so amount_usd is available for cross-currency matching)
   const fxResult = await resolveRate(parsed.native_currency);
   if (!fxResult.ok) {
-    await supabase.from("push_ingest_log").update({ status: "fx_pending" }).eq("dedup_key", dedupKey);
+    await patchIngestLog(supabase, dedupKey, { status: "fx_pending" });
     return { status: "fx_pending", dedup_key: dedupKey };
   }
   const amountUsd = calculateUsd(parsed.amount_native, fxResult.rate);
@@ -203,10 +229,10 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
   // Handle the 4 decision branches
   let needsReview = false;
   if (dedupDecision.action === "discard") {
-    await supabase.from("push_ingest_log").update({
+    await patchIngestLog(supabase, dedupKey, {
       status: "deduped_cross_source",
       transaction_id: dedupDecision.matchedTxId,
-    }).eq("dedup_key", dedupKey);
+    });
     console.log(`[push-ingest][dedup] discard: ${dedupDecision.reason}, matched=${dedupDecision.matchedTxId}`);
     return { status: "deduped_cross_source", kept_key: dedupDecision.matchedTxId };
   } else if (dedupDecision.action === "upgrade") {
@@ -229,10 +255,10 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     if (upgradeError) {
       console.error("[push-ingest][dedup] upgrade error:", upgradeError.message);
     }
-    await supabase.from("push_ingest_log").update({
+    await patchIngestLog(supabase, dedupKey, {
       status: "upgraded_cross_source",
       transaction_id: dedupDecision.matchedTxId,
-    }).eq("dedup_key", dedupKey);
+    });
     console.log(`[push-ingest][dedup] upgrade: ${dedupDecision.reason}, matched=${dedupDecision.matchedTxId}`);
     return { status: "deduped_cross_source", kept_key: dedupDecision.matchedTxId };
   } else if (dedupDecision.action === "insert_review") {
@@ -270,10 +296,10 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     (a: { id: string; name: string }) => a.name.toLowerCase() === parsed.account_name.toLowerCase(),
   );
   if (!account) {
-    await supabase
-      .from("push_ingest_log")
-      .update({ status: "registration_failed", error_message: `Account not found: ${parsed.account_name}` })
-      .eq("dedup_key", dedupKey);
+    await patchIngestLog(supabase, dedupKey, {
+      status: "registration_failed",
+      error_message: `Account not found: ${parsed.account_name}`,
+    });
     return { status: "registration_failed", error: `Account not found: ${parsed.account_name}` };
   }
 
@@ -304,22 +330,20 @@ export async function executePipeline(payload: PushPayload, mode: IngestMode): P
     .single();
 
   if (txError || !txData) {
-    await supabase
-      .from("push_ingest_log")
-      .update({ status: "registration_failed", error_message: txError?.message ?? "unknown" })
-      .eq("dedup_key", dedupKey);
+    console.error(`[push-ingest] transaction insert failed for ${dedupKey}:`, txError?.message ?? "unknown");
+    await patchIngestLog(supabase, dedupKey, {
+      status: "registration_failed",
+      error_message: txError?.message ?? "unknown",
+    });
     return { status: "registration_failed", error: txError?.message ?? "unknown insert error" };
   }
 
   // 10. Update ingest log with success
-  await supabase
-    .from("push_ingest_log")
-    .update({
-      status: "registered",
-      transaction_id: txData.id,
-      amount_usd: amountUsd,
-    })
-    .eq("dedup_key", dedupKey);
+  await patchIngestLog(supabase, dedupKey, {
+    status: "registered",
+    transaction_id: txData.id,
+    amount_usd: amountUsd,
+  });
 
   // 11. Evaluate semaphore and alert if state changed
   let semaphoreResult = undefined;

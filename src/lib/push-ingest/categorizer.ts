@@ -44,9 +44,7 @@ export async function categorize(
   }
 
   const supabase = getSupabaseAdmin();
-  // Cast needed: merchant_category_rules not yet in generated database.types.ts
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rules, error } = await (supabase as any)
+  const { data: rules, error } = await supabase
     .from("merchant_category_rules")
     .select("id, pattern, match_type, category_id, priority")
     .eq("user_id", userId)
@@ -57,7 +55,7 @@ export async function categorize(
     return { matched: false };
   }
 
-  for (const rule of rules as MerchantRule[]) {
+  for (const rule of rules) {
     if (matchesRule(merchant, rule)) {
       return { matched: true, category_id: rule.category_id, rule_id: rule.id };
     }

@@ -31,8 +31,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const admin = getSupabaseAdmin() as any;
+  const admin = getSupabaseAdmin();
 
   // Get the pending entry
   const { data: entry, error: fetchError } = await admin
@@ -47,17 +46,23 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   if (action === "reject") {
-    await admin.from("push_ingest_log").update({ status: "no_parser" }).eq("dedup_key", dedup_key);
+    const { error } = await admin.from("push_ingest_log").update({ status: "no_parser" }).eq("dedup_key", dedup_key);
+    if (error) {
+      console.error(`[push-ingest][confirm] reject update failed for ${dedup_key}:`, error.message);
+    }
     return NextResponse.json({ status: "rejected" });
   }
 
   // Approve — insert the transaction
-  const parsed: ParsedTransaction = JSON.parse(entry.pending_data);
+  const parsed: ParsedTransaction = JSON.parse(String(entry.pending_data));
 
   // FX
   const fxResult = await resolveRate(parsed.native_currency);
   if (!fxResult.ok) {
-    await admin.from("push_ingest_log").update({ status: "fx_pending" }).eq("dedup_key", dedup_key);
+    const { error } = await admin.from("push_ingest_log").update({ status: "fx_pending" }).eq("dedup_key", dedup_key);
+    if (error) {
+      console.error(`[push-ingest][confirm] fx_pending update failed for ${dedup_key}:`, error.message);
+    }
     return NextResponse.json({ status: "fx_pending" });
   }
   const amountUsd = calculateUsd(parsed.amount_native, fxResult.rate);
@@ -65,7 +70,10 @@ export async function POST(request: Request): Promise<NextResponse> {
   // Classify
   const classification = await classifyTransaction(parsed, OWNER_USER_ID);
   if (classification.type === "transfer") {
-    await admin.from("push_ingest_log").update({ status: "transfer" }).eq("dedup_key", dedup_key);
+    const { error } = await admin.from("push_ingest_log").update({ status: "transfer" }).eq("dedup_key", dedup_key);
+    if (error) {
+      console.error(`[push-ingest][confirm] transfer update failed for ${dedup_key}:`, error.message);
+    }
     return NextResponse.json({ status: "transfer" });
   }
 
@@ -88,9 +96,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     (a: { id: string; name: string }) => a.name.toLowerCase() === parsed.account_name.toLowerCase(),
   );
   if (!account) {
-    await admin.from("push_ingest_log")
+    const { error } = await admin.from("push_ingest_log")
       .update({ status: "registration_failed", error_message: `Account not found: ${parsed.account_name}` })
       .eq("dedup_key", dedup_key);
+    if (error) {
+      console.error(`[push-ingest][confirm] registration_failed update failed for ${dedup_key}:`, error.message);
+    }
     return NextResponse.json({ error: `Account not found: ${parsed.account_name}` }, { status: 400 });
   }
 
@@ -119,19 +130,26 @@ export async function POST(request: Request): Promise<NextResponse> {
     .single();
 
   if (txError || !txData) {
-    await admin.from("push_ingest_log")
+    console.error(`[push-ingest][confirm] transaction insert failed for ${dedup_key}:`, txError?.message ?? "unknown");
+    const { error } = await admin.from("push_ingest_log")
       .update({ status: "registration_failed", error_message: txError?.message ?? "unknown" })
       .eq("dedup_key", dedup_key);
+    if (error) {
+      console.error(`[push-ingest][confirm] registration_failed update failed for ${dedup_key}:`, error.message);
+    }
     return NextResponse.json({ error: txError?.message ?? "insert failed" }, { status: 500 });
   }
 
   // Update ingest log
-  await admin.from("push_ingest_log").update({
+  const { error: registeredError } = await admin.from("push_ingest_log").update({
     status: "registered",
     transaction_id: txData.id,
     amount_usd: amountUsd,
     pending_data: null,
   }).eq("dedup_key", dedup_key);
+  if (registeredError) {
+    console.error(`[push-ingest][confirm] registered update failed for ${dedup_key}:`, registeredError.message);
+  }
 
   return NextResponse.json({ status: "approved", transaction_id: txData.id });
 }
@@ -147,8 +165,7 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const admin = getSupabaseAdmin() as any;
+  const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("push_ingest_log")
     .select("dedup_key, package_name, amount_native, native_currency, merchant, pending_data, created_at")

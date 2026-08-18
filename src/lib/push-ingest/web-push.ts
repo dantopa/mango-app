@@ -30,8 +30,7 @@ export async function sendPushNotification(
     return { sent: 0, failed: 0 };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const supabase = getSupabaseAdmin() as any;
+  const supabase = getSupabaseAdmin();
   const { data: subscriptions } = await supabase
     .from("push_subscriptions")
     .select("id, endpoint, keys_p256dh, keys_auth")
@@ -62,7 +61,10 @@ export async function sendPushNotification(
         const statusCode = (err as { statusCode?: number })?.statusCode;
         if (statusCode === 410 || statusCode === 404) {
           // Subscription expired — clean up
-          await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+          const { error } = await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+          if (error) {
+            console.error(`[web-push] failed to remove stale subscription ${sub.id}:`, error.message);
+          }
         }
         failed++;
       }
