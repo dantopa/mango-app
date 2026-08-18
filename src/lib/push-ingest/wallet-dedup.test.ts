@@ -52,11 +52,10 @@ vi.mock("./web-push", () => ({
 }));
 
 vi.mock("../sync/dedup-core", () => ({
-  resolveDuplicate: vi.fn(() => ({ action: "insert", reason: "no match" })),
+  resolveDuplicate: vi.fn(() => ({ action: "insert" })),
 }));
 
 vi.mock("./parsers/llm-fallback", () => ({
-  isFinancialPackage: vi.fn(() => false),
   shouldTryLlmFallback: vi.fn(() => false),
   tryTemplateParser: vi.fn(() => null),
   llmFallbackParser: vi.fn(() => null),
@@ -260,7 +259,7 @@ describe("Wallet dedup — PENDING cleanup (Fix 1)", () => {
     mockIngestLogSelectResult = { data: [], error: null };
     vi.mocked(isDuplicate).mockResolvedValue(false);
     vi.mocked(resolveRate).mockResolvedValue({ ok: true, rate: 0.00024 });
-    vi.mocked(resolveDuplicate).mockResolvedValue({ action: "insert", reason: "no match" });
+    vi.mocked(resolveDuplicate).mockResolvedValue({ action: "insert" });
     vi.mocked(classifyTransaction).mockResolvedValue({ type: "expense" });
   });
 
@@ -363,7 +362,7 @@ describe("Wallet dedup — 3-minute echo dedup (Fix 2)", () => {
     mockIngestLogSelectResult = { data: [], error: null };
     vi.mocked(isDuplicate).mockResolvedValue(false);
     vi.mocked(resolveRate).mockResolvedValue({ ok: true, rate: 0.00024 });
-    vi.mocked(resolveDuplicate).mockResolvedValue({ action: "insert", reason: "no match" });
+    vi.mocked(resolveDuplicate).mockResolvedValue({ action: "insert" });
     vi.mocked(classifyTransaction).mockResolvedValue({ type: "expense" });
   });
 

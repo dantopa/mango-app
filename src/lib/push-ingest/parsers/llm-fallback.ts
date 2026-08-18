@@ -5,11 +5,6 @@ import { getSupabaseAdmin } from "../supabase-admin";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
-/** Is this package potentially financial? Uses the shared whitelist. */
-export function isFinancialPackage(packageName: string): boolean {
-  return PACKAGE_WHITELIST.has(packageName);
-}
-
 /**
  * Pre-filter: some financial packages send tons of marketing/delivery spam.
  * If the deterministic parser already rejected this notification, check if
@@ -37,6 +32,8 @@ interface TemplateRow {
   currency: string;
   account_name: string;
   is_expense: boolean;
+  /** Not part of the select above, so it is absent at runtime. */
+  hit_count?: number;
 }
 
 /**
@@ -85,7 +82,7 @@ export async function tryTemplateParser(payload: PushPayload): Promise<ParsedTra
       // Update hit count
       await supabase
         .from("push_parser_templates")
-        .update({ hit_count: (tpl as any).hit_count + 1, last_hit_at: new Date().toISOString() })
+        .update({ hit_count: (tpl.hit_count ?? 0) + 1, last_hit_at: new Date().toISOString() })
         .eq("id", tpl.id);
 
       return {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isFinancialPackage, tryTemplateParser, llmFallbackParser } from "./llm-fallback";
+import { tryTemplateParser, llmFallbackParser } from "./llm-fallback";
+import { isWhitelistedPackage } from "../package-whitelist";
 import type { PushPayload } from "../types";
 
 // Mock the supabase admin
@@ -33,20 +34,20 @@ function mockChain(data: unknown[] | null = null, error: unknown = null) {
   return chain;
 }
 
-describe("isFinancialPackage (uses shared PACKAGE_WHITELIST)", () => {
+describe("isWhitelistedPackage (shared PACKAGE_WHITELIST)", () => {
   it("returns true for known financial packages", () => {
-    expect(isFinancialPackage("com.grability.rappi")).toBe(true);
-    expect(isFinancialPackage("com.todo1.mobile")).toBe(true);
-    expect(isFinancialPackage("com.nexowallet")).toBe(true);
-    expect(isFinancialPackage("com.bbva.nxt_argentina")).toBe(true);
-    expect(isFinancialPackage("com.nequi.MobileApp")).toBe(true);
-    expect(isFinancialPackage("com.google.android.apps.walletnfcrel")).toBe(true);
+    expect(isWhitelistedPackage("com.grability.rappi")).toBe(true);
+    expect(isWhitelistedPackage("com.todo1.mobile")).toBe(true);
+    expect(isWhitelistedPackage("com.nexowallet")).toBe(true);
+    expect(isWhitelistedPackage("com.bbva.nxt_argentina")).toBe(true);
+    expect(isWhitelistedPackage("com.nequi.MobileApp")).toBe(true);
+    expect(isWhitelistedPackage("com.google.android.apps.walletnfcrel")).toBe(true);
   });
 
   it("returns false for unknown packages", () => {
-    expect(isFinancialPackage("com.spotify.music")).toBe(false);
-    expect(isFinancialPackage("com.whatsapp")).toBe(false);
-    expect(isFinancialPackage("com.instagram.android")).toBe(false);
+    expect(isWhitelistedPackage("com.spotify.music")).toBe(false);
+    expect(isWhitelistedPackage("com.whatsapp")).toBe(false);
+    expect(isWhitelistedPackage("com.instagram.android")).toBe(false);
   });
 });
 

@@ -132,11 +132,10 @@ vi.mock("./supabase-admin", () => ({
 }));
 
 vi.mock("../sync/dedup-core", () => ({
-  resolveDuplicate: vi.fn(() => ({ action: "insert", reason: "no match" })),
+  resolveDuplicate: vi.fn(() => ({ action: "insert" })),
 }));
 
 vi.mock("./parsers/llm-fallback", () => ({
-  isFinancialPackage: vi.fn(() => false),
   shouldTryLlmFallback: vi.fn(() => false),
   tryTemplateParser: vi.fn(() => null),
   llmFallbackParser: vi.fn(() => null),
@@ -149,7 +148,7 @@ import { executePipeline } from "./pipeline";
 import { isDuplicate } from "./dedup";
 import { getParser } from "./parser-registry";
 import { resolveRate } from "./fx";
-import { isFinancialPackage, shouldTryLlmFallback, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
+import { shouldTryLlmFallback, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
 import { classifyTransaction } from "./classifier";
 import { resolveDuplicate } from "../sync/dedup-core";
 
@@ -176,7 +175,7 @@ describe("executePipeline", () => {
     vi.mocked(getParser).mockReturnValue(() => parsedTx);
     vi.mocked(isDuplicate).mockResolvedValue(false);
     vi.mocked(resolveRate).mockResolvedValue({ ok: true, rate: 0.00024 });
-    vi.mocked(resolveDuplicate).mockResolvedValue({ action: "insert", reason: "no match" });
+    vi.mocked(resolveDuplicate).mockResolvedValue({ action: "insert" });
     vi.mocked(classifyTransaction).mockResolvedValue({ type: "expense" });
   });
 
@@ -194,13 +193,14 @@ describe("executePipeline", () => {
     }
   });
 
-  it("returns 'no_parser' when no parser matches and not financial", async () => {
+  it("returns 'no_parser' when no parser matches and LLM fallback is skipped", async () => {
     vi.mocked(getParser).mockReturnValue(undefined);
     vi.mocked(tryTemplateParser).mockResolvedValue(null);
-    vi.mocked(isFinancialPackage).mockReturnValue(false);
+    vi.mocked(shouldTryLlmFallback).mockReturnValue(false);
 
     const result = await executePipeline(basePayload, "full_pipeline");
     expect(result.status).toBe("no_parser");
+    expect(llmFallbackParser).not.toHaveBeenCalled();
   });
 
   it("falls back to template parser when deterministic parser returns null", async () => {
@@ -215,7 +215,6 @@ describe("executePipeline", () => {
   it("falls back to LLM when deterministic + template both fail for financial package", async () => {
     vi.mocked(getParser).mockReturnValue(() => null);
     vi.mocked(tryTemplateParser).mockResolvedValue(null);
-    vi.mocked(isFinancialPackage).mockReturnValue(true);
     vi.mocked(shouldTryLlmFallback).mockReturnValue(true);
     vi.mocked(llmFallbackParser).mockResolvedValue(parsedTx);
 
@@ -225,7 +224,7 @@ describe("executePipeline", () => {
   });
 
   it("returns 'fx_pending' when FX rate resolution fails", async () => {
-    vi.mocked(resolveRate).mockResolvedValue({ ok: false, rate: 0 });
+    vi.mocked(resolveRate).mockResolvedValue({ ok: false, reason: "error" });
 
     const result = await executePipeline(basePayload, "full_pipeline");
     expect(result.status).toBe("fx_pending");
@@ -251,7 +250,7 @@ describe("executePipeline", () => {
   });
 
   it("handles transfer classification (skips insertion)", async () => {
-    vi.mocked(classifyTransaction).mockResolvedValue({ type: "transfer" });
+    vi.mocked(classifyTransaction).mockResolvedValue({ type: "transfer", is_payment: true });
 
     const result = await executePipeline(basePayload, "full_pipeline");
     expect(result.status).toBe("registered");

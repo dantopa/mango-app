@@ -11,7 +11,7 @@ import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
 import { resolveDuplicate } from "../sync/dedup-core";
 import type { DedupCandidate } from "../sync/dedup-core";
-import { shouldTryLlmFallback, isFinancialPackage, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
+import { shouldTryLlmFallback, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
 import "./parsers"; // side-effect: registers all parsers
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";

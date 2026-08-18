@@ -42,7 +42,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     // 5. Extract package name and check whitelist
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rawPayload = body as Record<string, unknown>;
     const packageName = String(rawPayload.packageName ?? rawPayload.appName ?? rawPayload.package ?? "unknown");
 
