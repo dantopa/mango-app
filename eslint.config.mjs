@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Not Next.js code — mirrors the "exclude" in tsconfig.json.
+    // Deno (Supabase Edge Functions), a Chrome extension and build scripts:
+    // Next/React rules produce only false positives here.
+    "supabase/functions/**",
+    "tools/**",
+    "scripts/**",
   ]),
 ]);
 

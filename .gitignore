@@ -38,6 +38,9 @@ yarn-error.log*
 # role key is NEVER committed.
 !.env.production
 
+# supabase (CLI local cache — linked project ref, tool versions)
+supabase/.temp/
+
 # kiro
 # .kiro/
 
