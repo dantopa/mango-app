@@ -18,6 +18,18 @@ export type PushNotificationPayload = {
 };
 
 /**
+ * `high` porque estos avisos son de una compra que acaba de pasar. Con la urgencia
+ * por defecto (`normal`) FCM considera el mensaje diferible y en un teléfono en
+ * Doze lo retiene hasta la próxima ventana de mantenimiento o hasta que se abre la
+ * app — que era justamente el síntoma: la compra quedaba registrada en un segundo
+ * y la notificación aparecía recién al abrir Maquinita.
+ *
+ * TTL corto por lo mismo: si el teléfono estuvo horas sin red, un aviso de
+ * "compra registrada" viejo ya no informa nada, sólo molesta.
+ */
+const DELIVERY_OPTIONS = { urgency: "high", TTL: 6 * 60 * 60 } as const;
+
+/**
  * Send a web push notification to all subscriptions for a user.
  * Silently removes stale subscriptions (410 Gone).
  */
@@ -55,7 +67,7 @@ export async function sendPushNotification(
       };
 
       try {
-        await webpush.sendNotification(pushSubscription, jsonPayload);
+        await webpush.sendNotification(pushSubscription, jsonPayload, DELIVERY_OPTIONS);
         sent++;
       } catch (err: unknown) {
         const statusCode = (err as { statusCode?: number })?.statusCode;
