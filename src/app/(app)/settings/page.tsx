@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bell, BellOff, Send, RefreshCw } from "lucide-react";
+import { Bell, BellOff, Send, RefreshCw, Smartphone } from "lucide-react";
 
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -10,6 +10,100 @@ import { Badge } from "@/components/ui/badge";
 
 function timestamp() {
   return new Date().toLocaleTimeString("es-AR", { hour12: false });
+}
+
+type Device = {
+  id: string;
+  label: string;
+  paired_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+
+async function fetchDevices(): Promise<Device[]> {
+  const res = await fetch("/api/push-ingest/devices");
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.devices;
+}
+
+/**
+ * Paired phones. This is the only place a lost device can be cut off: its token
+ * exists nowhere but on the phone, so revoking the row is the only lever there is.
+ */
+function DevicesCard() {
+  const [devices, setDevices] = useState<Device[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchDevices().then((loaded) => {
+      if (!cancelled) setDevices(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const revoke = async (id: string) => {
+    setBusyId(id);
+    await fetch("/api/push-ingest/devices", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setDevices(await fetchDevices());
+    setBusyId(null);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Smartphone className="size-5" />
+          Teléfonos vinculados
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {devices === null ? (
+          <p className="text-sm text-muted-foreground">Cargando…</p>
+        ) : devices.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Ninguno. Se vinculan desde la app de Android, con &ldquo;Vincular este
+            teléfono&rdquo;.
+          </p>
+        ) : (
+          devices.map((device) => (
+            <div
+              key={device.id}
+              className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+            >
+              <div className="min-w-0 space-y-1">
+                <p className="truncate text-sm font-medium">{device.label}</p>
+                <p className="text-xs text-muted-foreground">
+                  {device.last_used_at
+                    ? `Último uso: ${new Date(device.last_used_at).toLocaleString("es-AR")}`
+                    : "Todavía no envió nada"}
+                </p>
+              </div>
+              {device.revoked_at ? (
+                <Badge variant="destructive">Revocado</Badge>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busyId === device.id}
+                  onClick={() => revoke(device.id)}
+                >
+                  Revocar
+                </Button>
+              )}
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function SettingsPage() {
@@ -238,6 +332,8 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <DevicesCard />
 
       {/* Logs panel */}
       <Card>
