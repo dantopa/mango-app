@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 export const maxDuration = 300;
 
 import { validateBearer } from "@/lib/push-ingest/auth";
+import { alertStaleIngest, type StalenessReport } from "@/lib/push-ingest/staleness";
 import { runGmailMonth } from "@/lib/sync/gmail/orchestrator";
 import { GmailAuthError } from "@/lib/sync/gmail/client";
 import type { GmailSyncCursor } from "@/lib/sync/gmail/types";
@@ -66,11 +67,22 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 4. Return summary
+  // 4. Check the push ingest is still alive — Gmail failing is visible in the
+  // next sync, a dead notification reader is not.
+  let staleness: StalenessReport[] = [];
+  try {
+    staleness = await alertStaleIngest(now.getTime());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    errors.push({ source: "push_ingest_staleness", error: msg });
+  }
+
+  // 5. Return summary
   return NextResponse.json({
     month,
     results,
     errors,
+    staleness,
     total_inserted: results.reduce((sum, r) => sum + r.inserted, 0),
     total_duplicates: results.reduce((sum, r) => sum + r.duplicates, 0),
   });
