@@ -120,7 +120,8 @@ export async function logProcessedEmail(params: {
 // Ingreso detection regex (Bancolombia "recibiste una transferencia/un pago")
 // ---------------------------------------------------------------------------
 
-const RE_INGRESO = /recibiste (una transferencia|un pago)/i;
+// `\s+` por el corte de línea del text/plain — ver el comentario en sources/bancolombia.ts.
+const RE_INGRESO = /recibiste\s+(una\s+transferencia|un\s+pago)/i;
 
 // ---------------------------------------------------------------------------
 // runGmailSource

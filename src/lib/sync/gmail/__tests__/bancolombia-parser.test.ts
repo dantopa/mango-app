@@ -108,6 +108,16 @@ describe("Bancolombia Gmail parser", () => {
       expect(result).toEqual([]);
     });
 
+    // El text/plain real viene cortado a 72 columnas y bodyText lo prefiere sobre
+    // el HTML, así que la frase llega partida. Con espacios literales en el regex
+    // no se detectaba ni un ingreso, y todos caían al camino de la IA.
+    it("INGRESO: también cuando el text/plain corta la frase en dos líneas", () => {
+      const email = loadFixture("bancolombia-ingreso-wrapped.txt");
+
+      expect(email.bodyText).toContain("recibiste una\ntransferencia");
+      expect(bancolombiaDef.parse(email)).toEqual([]);
+    });
+
     it("NO-TX: returns [] for non-transactional emails", () => {
       const email = loadFixture("bancolombia-no-tx.txt");
       const result = bancolombiaDef.parse(email);

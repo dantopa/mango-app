@@ -13,7 +13,13 @@ const ACCOUNT_NAME = "Bancolombia Ahorros";
 
 // --- Classification regexes (ordered most-specific first) ---
 
-const RE_INGRESO = /(recibiste una transferencia|recibiste un pago)/i;
+/**
+ * `\s+` y no un espacio literal: el `text/plain` de Bancolombia viene cortado a
+ * 72 columnas, y `bodyText` prefiere esa parte antes que el HTML. Con espacios
+ * literales la frase no matcheaba cuando el corte caía justo en el medio
+ * ("recibiste una\ntransferencia"), que es lo que pasaba con todos los ingresos.
+ */
+const RE_INGRESO = /recibiste\s+(una\s+transferencia|un\s+pago)/i;
 const RE_COMPRA = /compraste\s+\$[\d.,]+\s+en/i;
 const RE_PAGO_SERVICIO = /pagaste\s+\$[\d.,]+\s+a[\s\S]+?desde\s+tu\s+producto/i;
 const RE_QR = /pagaste[\s\S]*?por\s+codigo\s+QR/i;

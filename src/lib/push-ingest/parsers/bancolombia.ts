@@ -4,7 +4,9 @@ import { parseCopAmount, normalizeDate } from "@/lib/sync/gmail/money";
 
 // --- Classification regexes (ordered most-specific first) ---
 
-const RE_ENTRADA = /(recibiste una transferencia|recibiste un pago)/i;
+// `\s+` por el mismo motivo que en sync/gmail: el texto largo de la notificación
+// puede venir cortado, y un ingreso mal clasificado se vuelve un gasto inventado.
+const RE_ENTRADA = /recibiste\s+(una\s+transferencia|un\s+pago)/i;
 const RE_PAGO_QR = /pagaste .* por codigo QR/i;
 const RE_PAGO_SERVICIO = /pagaste \$[\d.,]+ a/i;
 const RE_COMPRA = /compraste \$[\d.,]+ en/i;
