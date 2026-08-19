@@ -492,9 +492,6 @@ export async function executePipeline(
         days_in_month: daysInMonth,
       });
 
-      // Alert on state transition
-      checkAndAlert(null, semaphoreResult.state); // TODO: track previous state
-
       console.log("[push-ingest][semaphore]", JSON.stringify({
         state: semaphoreResult.state,
         spent: accumulatedSpend,
@@ -502,6 +499,20 @@ export async function executePipeline(
         pct: semaphoreResult.pct,
         daily_budget: Math.round(Math.max(0, (ceiling - accumulatedSpend) / (daysInMonth - currentDay + 1)) * 100) / 100,
       }));
+
+      // El semáforo de antes de esta compra. Comparar los dos es lo que detecta el
+      // cruce de línea; sin gasto previo en el mes no hay estado anterior.
+      const spendBefore = accumulatedSpend - amountUsd;
+      const previousSemaphore = spendBefore > 0
+        ? computeSemaphore({
+            accumulated_spend: spendBefore,
+            ceiling,
+            current_day: currentDay,
+            days_in_month: daysInMonth,
+          })
+        : null;
+
+      await checkAndAlert(OWNER_USER_ID, previousSemaphore, semaphoreResult);
     }
   } catch (e) {
     console.error("[push-ingest][semaphore] error:", e);
