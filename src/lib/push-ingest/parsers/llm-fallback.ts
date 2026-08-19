@@ -26,7 +26,13 @@ import { getSupabaseAdmin } from "../supabase-admin";
  *     worthless, and 28 such templates accumulated with zero hits.
  */
 
-const OPENAI_MODEL = "gpt-5.4-mini";
+/**
+ * Cheapest model of the current generation: it wrote a self-verifying pattern for
+ * every notification format tried, at roughly a quarter of the price of
+ * gpt-5.4-mini. Its parameters are stricter — `temperature` only accepts the
+ * default and the cap is `max_completion_tokens`.
+ */
+const OPENAI_MODEL = "gpt-5.6-luna";
 const OPENAI_TIMEOUT_MS = 12_000;
 
 /** Cap on an AI-authored pattern; anything longer is not a notification format. */
@@ -261,7 +267,9 @@ async function callOpenAi(prompt: string, apiKey: string): Promise<unknown | nul
       body: JSON.stringify({
         model: OPENAI_MODEL,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0,
+        // Structuring one notification is a transcription job, not a reasoning
+        // one: effort "low" tripled the latency and produced no better patterns.
+        reasoning_effort: "none",
         response_format: { type: "json_object" },
       }),
       signal: controller.signal,

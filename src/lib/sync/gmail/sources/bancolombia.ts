@@ -2,6 +2,15 @@ import type { GmailSourceDef, ParsedEmail } from "../types";
 import type { CandidateTransaction } from "../../types";
 import { parseCopAmount, normalizeDate } from "../money";
 
+/**
+ * The debit card and the savings account are the same Bancolombia account: this
+ * source used to write to a separate "Bancolombia Débito", which split the same
+ * account across two rows depending on which source saw the purchase (push
+ * ingest and the arriendo source already wrote to savings). The duplicate was
+ * merged; everything Bancolombia lands here.
+ */
+const ACCOUNT_NAME = "Bancolombia Ahorros";
+
 // --- Classification regexes (ordered most-specific first) ---
 
 const RE_INGRESO = /(recibiste una transferencia|recibiste un pago)/i;
@@ -120,7 +129,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
       merchant,
       tx_date: txDate,
       description_raw: descriptionRaw,
-      account_name: "Bancolombia Débito",
+      account_name: ACCOUNT_NAME,
       source: "sync_gmail_bancolombia",
       card_last4,
     },
@@ -130,7 +139,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
 export const bancolombiaDef: GmailSourceDef = {
   id: "bancolombia",
   syncSource: "sync_gmail_bancolombia",
-  accountName: "Bancolombia Débito",
+  accountName: ACCOUNT_NAME,
   closeItemSource: "Bancolombia",
   buildQuery,
   parse,

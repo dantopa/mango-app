@@ -44,7 +44,9 @@ describe("Bancolombia Gmail parser", () => {
       expect(result[0].tx_date).toBe("2026-06-09");
       expect(result[0].native_currency).toBe("COP");
       expect(result[0].source).toBe("sync_gmail_bancolombia");
-      expect(result[0].account_name).toBe("Bancolombia Débito");
+      // Same physical account as the push ingest: the separate "Bancolombia
+      // Débito" row was merged into savings.
+      expect(result[0].account_name).toBe("Bancolombia Ahorros");
     });
 
     it("PAGO SERVICIO: extracts beneficiary as merchant", () => {

@@ -1,13 +1,22 @@
 /**
  * AI-powered categorizer fallback.
  *
- * When the deterministic categorizer (merchant_category_rules) has no match,
- * calls GPT-4o-mini to suggest a category. If confident, auto-creates a rule
- * so the same merchant is categorized deterministically next time.
+ * When the deterministic categorizer (merchant_category_rules) has no match, the
+ * model suggests a category. If confident, auto-creates a rule so the same
+ * merchant is categorized deterministically next time.
  *
- * Cost: ~$0.001 per transaction (input + output tokens).
+ * Cost: ~200 input tokens per uncategorized merchant, once — the rule handles
+ * the repeats.
  */
 import { getSupabaseAdmin } from "./supabase-admin";
+
+/**
+ * Cheapest model of the current generation. Its parameter rules differ from the
+ * older ones: `temperature` only accepts the default, and the token cap is
+ * `max_completion_tokens` — `max_tokens` is a hard 400, which is what silently
+ * disabled this whole path.
+ */
+const OPENAI_MODEL = "gpt-5.6-luna";
 
 export type AiCategorizationResult =
   | { matched: true; category_id: string; category_name: string; auto_rule_created: boolean }
@@ -82,13 +91,15 @@ Descripción: "${descriptionRaw}"`;
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-5.4-mini",
+        model: OPENAI_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
         ],
-        temperature: 0,
-        max_tokens: 50,
+        // Picking one name off a list needs no deliberation, and reasoning tokens
+        // would eat the output cap.
+        reasoning_effort: "none",
+        max_completion_tokens: 50,
       }),
       signal: controller.signal,
     });
