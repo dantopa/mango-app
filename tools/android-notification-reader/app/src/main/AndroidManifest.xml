@@ -29,9 +29,13 @@
           The launcher IS the PWA: Chrome renders it full screen, sharing the
           browser's session, service worker and web push. Updating the site
           updates the app, so there is nothing to reinstall.
+
+          Our own subclass, only so it can warn before opening a dashboard whose
+          sensor is off — Android's notification-listener state is invisible to the
+          page Chrome renders.
         -->
         <activity
-            android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:name=".LauncherActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">

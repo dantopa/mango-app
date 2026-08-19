@@ -7,36 +7,32 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings as AndroidSettings
 import android.widget.Button
-import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Single screen: configure the endpoint, grant notification access, check status. */
+/** Sensor setup: pair the phone, grant notification access, check the status. */
 class MainActivity : Activity() {
 
     private lateinit var settings: Settings
-    private lateinit var endpointField: EditText
-    private lateinit var tokenField: EditText
     private lateinit var statusView: TextView
+    private lateinit var pairButton: Button
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         settings = Settings(this)
-        endpointField = findViewById(R.id.endpoint)
-        tokenField = findViewById(R.id.token)
         statusView = findViewById(R.id.status)
+        pairButton = findViewById(R.id.pair)
 
-        endpointField.setText(settings.endpoint)
-        tokenField.setText(settings.token)
-
-        findViewById<Button>(R.id.save).setOnClickListener { save() }
+        pairButton.setOnClickListener { pair() }
         findViewById<Button>(R.id.grantAccess).setOnClickListener {
             startActivity(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
@@ -49,36 +45,39 @@ class MainActivity : Activity() {
         refreshStatus()
     }
 
-    private fun save() {
-        val endpoint = endpointField.text.toString().trim()
-        val token = tokenField.text.toString().trim()
+    /**
+     * Enrols off the main thread, then hands the pairing URL to the browser, which
+     * is where the session lives. Nothing is typed and nothing secret is shown.
+     */
+    private fun pair() {
+        pairButton.isEnabled = false
+        toast(getString(R.string.pairing_started))
 
-        if (!endpoint.startsWith("https://")) {
-            toast(getString(R.string.invalid_endpoint))
-            return
-        }
-        if (token.isEmpty()) {
-            toast(getString(R.string.missing_token))
-            return
-        }
-
-        settings.endpoint = endpoint
-        settings.token = token
-        toast(getString(R.string.saved))
-
-        // Anything queued while the app was misconfigured can go out now.
-        UploadWorker.enqueue(applicationContext)
-        refreshStatus()
+        Thread {
+            val result = runCatching { Pairing.enroll(this, settings) }
+            mainHandler.post {
+                pairButton.isEnabled = true
+                result.fold(
+                    onSuccess = { startActivity(Intent(Intent.ACTION_VIEW, it)) },
+                    onFailure = { error ->
+                        val reason = (error as? IOException)?.message ?: error.toString()
+                        toast(getString(R.string.pairing_failed, reason))
+                    },
+                )
+                refreshStatus()
+            }
+        }.start()
     }
 
     /**
      * Uses a package the server does not whitelist, so a successful round trip
-     * proves the URL and the token without inventing a transaction: the server
-     * answers 200 {"status":"ignored"} after the auth check passes.
+     * proves the token was approved without inventing a transaction: the server
+     * answers 200 {"status":"ignored"} after the auth check passes. An unapproved
+     * token answers 401, which is what distinguishes "enrolled" from "paired".
      */
     private fun sendTest() {
         if (!settings.isConfigured) {
-            toast(getString(R.string.invalid_endpoint))
+            toast(getString(R.string.not_paired))
             return
         }
         val payload = JSONObject()
@@ -90,7 +89,7 @@ class MainActivity : Activity() {
         IngestQueue.add(applicationContext, payload.toString())
         UploadWorker.enqueue(applicationContext)
         toast(getString(R.string.test_queued))
-        Handler(Looper.getMainLooper()).postDelayed({ refreshStatus() }, 2000)
+        mainHandler.postDelayed({ refreshStatus() }, 2000)
     }
 
     private fun refreshStatus() {
@@ -103,8 +102,9 @@ class MainActivity : Activity() {
         }
 
         statusView.text = listOf(
+            "servidor: ${settings.endpoint}",
             "acceso a notificaciones: " + if (listenerEnabled) "activo" else "NO ACTIVO",
-            "configuración: " + if (settings.isConfigured) "ok" else "incompleta",
+            "teléfono vinculado: " + if (settings.isConfigured) "sí" else "NO",
             "pendientes en cola: ${IngestQueue.size(applicationContext)}",
             "último envío: $lastResult",
         ).joinToString("\n")

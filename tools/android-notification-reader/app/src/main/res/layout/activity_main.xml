@@ -17,37 +17,15 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/endpoint_label"
-            android:textStyle="bold" />
-
-        <EditText
-            android:id="@+id/endpoint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/endpoint_hint"
-            android:importantForAutofill="no"
-            android:inputType="textUri" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/token_label"
-            android:textStyle="bold" />
-
-        <EditText
-            android:id="@+id/token"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:importantForAutofill="no"
-            android:inputType="textPassword" />
+            android:text="@string/setup_intro"
+            android:textSize="14sp" />
 
         <Button
-            android:id="@+id/save"
+            android:id="@+id/pair"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/save" />
+            android:layout_marginTop="24dp"
+            android:text="@string/pair_device" />
 
         <Button
             android:id="@+id/grantAccess"

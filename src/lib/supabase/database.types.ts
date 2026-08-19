@@ -320,6 +320,45 @@ export type Database = {
           },
         ]
       }
+      push_ingest_devices: {
+        Row: {
+          created_at: string
+          id: string
+          label: string
+          last_used_at: string | null
+          paired_at: string | null
+          pairing_code_hash: string | null
+          pairing_expires_at: string | null
+          revoked_at: string | null
+          token_hash: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label: string
+          last_used_at?: string | null
+          paired_at?: string | null
+          pairing_code_hash?: string | null
+          pairing_expires_at?: string | null
+          revoked_at?: string | null
+          token_hash: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          paired_at?: string | null
+          pairing_code_hash?: string | null
+          pairing_expires_at?: string | null
+          revoked_at?: string | null
+          token_hash?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       push_ingest_log: {
         Row: {
           amount_native: number | null

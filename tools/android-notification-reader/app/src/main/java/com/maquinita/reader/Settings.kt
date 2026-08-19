@@ -3,19 +3,22 @@ package com.maquinita.reader
 import android.content.Context
 
 /**
- * Endpoint and bearer token, typed once in the app and kept on the device. The
- * token is the same PUSH_INGEST_SECRET the server checks, so it is never written
- * into the repo and never backed up (see allowBackup in the manifest).
+ * Where to post and what to post it with.
+ *
+ * Neither is typed by hand any more. The endpoint is derived from the site the
+ * TWA opens — there is only ever one server — and the token is generated on the
+ * phone during pairing. So this holds a secret that exists nowhere else: it is
+ * never backed up (see allowBackup in the manifest) and cannot be recovered from
+ * the server, only replaced by pairing again.
  */
 class Settings(context: Context) {
 
-    private val prefs = context.getSharedPreferences("config", Context.MODE_PRIVATE)
+    private val app = context.applicationContext
+    private val prefs = app.getSharedPreferences("config", Context.MODE_PRIVATE)
 
-    var endpoint: String
-        get() = prefs.getString(KEY_ENDPOINT, "").orEmpty()
-        set(value) {
-            prefs.edit().putString(KEY_ENDPOINT, value.trim()).commit()
-        }
+    /** https by construction: twa_url is the origin the Digital Asset Links verify. */
+    val endpoint: String
+        get() = app.getString(R.string.twa_url) + INGEST_PATH
 
     var token: String
         get() = prefs.getString(KEY_TOKEN, "").orEmpty()
@@ -36,12 +39,15 @@ class Settings(context: Context) {
             .commit()
     }
 
-    /** https only: a plaintext endpoint would put the bearer token on the wire. */
+    /**
+     * Having a token is not proof it was approved — pairing needs a second step in
+     * the browser — so this only means there is something to send.
+     */
     val isConfigured: Boolean
-        get() = endpoint.startsWith("https://") && token.isNotEmpty()
+        get() = token.isNotEmpty()
 
     private companion object {
-        const val KEY_ENDPOINT = "endpoint"
+        const val INGEST_PATH = "/api/push-ingest"
         const val KEY_TOKEN = "token"
         const val KEY_LAST_RESULT = "last_result"
         const val KEY_LAST_RESULT_AT = "last_result_at"

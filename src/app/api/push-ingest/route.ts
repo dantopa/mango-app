@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { validateAuth } from "@/lib/push-ingest/auth";
+import { validateIngestAuth } from "@/lib/push-ingest/auth";
 import { isWhitelistedPackage } from "@/lib/push-ingest/package-whitelist";
 import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
@@ -28,8 +28,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    // 3. Auth validation
-    const authResult = validateAuth(request.headers.get("authorization"));
+    // 3. Auth validation (shared secret or a paired device token)
+    const authResult = await validateIngestAuth(request.headers.get("authorization"));
     if (!authResult.ok) {
       return NextResponse.json(authResult.body, { status: authResult.status });
     }

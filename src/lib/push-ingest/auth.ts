@@ -1,5 +1,7 @@
 import { timingSafeEqual } from "crypto";
 
+import { authenticateDevice } from "./devices";
+
 export type AuthResult =
   | { ok: true }
   | { ok: false; status: 401; body: { error: "unauthorized" } };
@@ -22,6 +24,31 @@ const UNAUTHORIZED: AuthResult = {
  */
 export function validateAuth(authHeader: string | null): AuthResult {
   return validateBearer(authHeader, process.env.PUSH_INGEST_SECRET);
+}
+
+/**
+ * Ingest auth: the shared PUSH_INGEST_SECRET or a paired device token.
+ *
+ * The secret is tried first because it costs no round trip, and because a device
+ * token can only be checked by hashing it and looking the hash up — there is no
+ * constant-time path for that, and there is nothing to protect: the digest is not
+ * the credential.
+ */
+export async function validateIngestAuth(authHeader: string | null): Promise<AuthResult> {
+  const shared = validateAuth(authHeader);
+  if (shared.ok) return shared;
+
+  const token = bearerToken(authHeader);
+  if (!token) return UNAUTHORIZED;
+
+  const device = await authenticateDevice(token, new Date());
+  return device ? { ok: true } : UNAUTHORIZED;
+}
+
+function bearerToken(authHeader: string | null): string | null {
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const token = authHeader.slice("Bearer ".length);
+  return token.length > 0 ? token : null;
 }
 
 /**

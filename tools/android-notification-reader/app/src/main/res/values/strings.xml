@@ -21,15 +21,20 @@
         }]
     </string>
 
-    <string name="endpoint_label">URL del endpoint</string>
-    <string name="endpoint_hint">https://tu-app.vercel.app/api/push-ingest</string>
-    <string name="token_label">Token (PUSH_INGEST_SECRET)</string>
-    <string name="save">Guardar</string>
+    <string name="setup_intro">Dos pasos: vinculá el teléfono y dale acceso a las notificaciones. No hay nada que escribir.</string>
+    <string name="pair_device">Vincular este teléfono</string>
     <string name="grant_access">Dar acceso a notificaciones</string>
     <string name="send_test">Enviar prueba</string>
     <string name="refresh">Actualizar estado</string>
-    <string name="saved">Configuración guardada</string>
-    <string name="invalid_endpoint">La URL tiene que empezar con https://</string>
-    <string name="missing_token">Falta el token</string>
+    <string name="pairing_started">Abriendo el navegador para aprobar…</string>
+    <string name="pairing_failed">No se pudo vincular: %1$s</string>
+    <string name="not_paired">Primero vinculá el teléfono</string>
     <string name="test_queued">Prueba encolada</string>
+
+    <!-- Shown by LauncherActivity before the dashboard when the sensor is not usable. -->
+    <string name="sensor_warning_title">El lector de gastos está apagado</string>
+    <string name="sensor_not_paired">Este teléfono todavía no está vinculado, así que tus compras no se están registrando.</string>
+    <string name="sensor_no_access">Falta el acceso a notificaciones, así que tus compras no se están registrando.</string>
+    <string name="sensor_fix">Arreglarlo</string>
+    <string name="sensor_ignore">Ver el panel igual</string>
 </resources>

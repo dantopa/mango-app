@@ -12,8 +12,14 @@ La app oficial: un solo APK que es **el dashboard y el sensor de gastos**.
 ## Por qué TWA y no WebView
 
 Un `WebView` **no implementa la Push API**, así que envolver el PWA en uno rompería
-las notificaciones, incluida la alerta del cron que avisa cuando el sensor deja de
-reportar. La TWA usa el motor del navegador y las conserva.
+las notificaciones (las alertas de presupuesto, por ejemplo). La TWA usa el motor
+del navegador y las conserva.
+
+El costo de la TWA es que Chrome no le muestra a la página nada del estado de
+Android: si el acceso a notificaciones se apagó, el dashboard no tiene forma de
+saberlo. Por eso `LauncherActivity` es una subclase nuestra — chequea antes de
+abrir y avisa con un diálogo nativo, que es el único lugar del producto que ve las
+dos mitades.
 
 Y el sensor no puede "pasarle la data al WebView" en vez de hacer el POST: las
 notificaciones llegan con la app cerrada, cuando no existe ninguna Activity ni
@@ -120,35 +126,60 @@ otra y se actualiza el fingerprint.
 
 ## Configuración en el celular
 
-Al abrir **Maquinita** entrás directo al dashboard. La pantalla del sensor está en
-el **long-press del ícono → "Lector de notificaciones"** (no es el launcher, y no
-está exportada, así que ninguna otra app puede abrirla).
+No hay nada que escribir. Al abrir **Maquinita** entrás directo al dashboard; si
+el sensor no está usable, antes aparece un cartel nativo con **Arreglarlo**, que
+lleva a la pantalla del sensor. También llegás a mano con el **long-press del
+ícono → "Lector de notificaciones"** (no es el launcher y no está exportada, así
+que ninguna otra app puede abrirla).
 
-1. **URL del endpoint**: `https://<tu-dominio>/api/push-ingest` (tiene que ser
-   https: el token viaja en el header).
-2. **Token**: el valor de `PUSH_INGEST_SECRET` de Vercel. Está marcado como
-   `sensitive`, o sea write-only: no se puede leer de vuelta ni por dashboard ni
-   por API. Si no lo tenés guardado, hay que rotarlo (ver abajo). Queda solo en
-   el celular — `allowBackup="false"`, no se sube al backup de Google ni al repo.
-3. **Guardar** → **Dar acceso a notificaciones** → activar "Maquinita" en la
-   pantalla del sistema.
-4. **Enviar prueba**: usa un packageName que el servidor no whitelistea, así
-   valida URL y token sin crear ninguna transacción. Si el estado muestra
-   `HTTP 200`, está andando. `HTTP 401` = token mal.
+1. **Vincular este teléfono** → abre el navegador en `/pair`, con tu sesión ya
+   iniciada, y queda aprobado. Dos toques.
+2. **Dar acceso a notificaciones** → activar "Maquinita" en la pantalla del
+   sistema.
+3. **Enviar prueba** (opcional): usa un packageName que el servidor no
+   whitelistea, así valida el token sin crear ninguna transacción. `HTTP 200` =
+   andando; `HTTP 401` = el token no está aprobado.
+
+El endpoint no se configura: sale de `twa_url`, que es el mismo origin que
+verifican los Digital Asset Links. Si cambiás de dominio, ya lo estabas tocando.
 
 Desde Android 13, el acceso a notificaciones está detrás de "ajustes restringidos"
 para apps que no vienen de una store. Si el toggle aparece gris: Info de la app →
 menú ⋮ → *Permitir ajustes restringidos*.
 
-El estado de la pantalla (acceso activo, pendientes en cola, último envío) es lo
-que hay que mirar si dejan de aparecer gastos: no hay ninguna alerta del lado del
-servidor.
+El estado de la pantalla (acceso activo, teléfono vinculado, pendientes en cola,
+último envío) es lo que hay que mirar si dejan de aparecer gastos: no hay ninguna
+alerta del lado del servidor.
 
-## Rotar el token
+## Cómo funciona el vínculo
 
-Nada más consume `PUSH_INGEST_SECRET` (el forwarder de terceros ya no existe),
-así que rotarlo solo afecta a esta app. El runtime lee las env vars del snapshot
-del deployment, así que hace falta redeployar para que el valor nuevo aplique:
+El celular genera su propio token de 32 bytes y un código de un solo uso, y
+manda **solo los SHA-256** a `POST /api/push-ingest/devices/enroll`, que no pide
+sesión: la fila que crea no tiene dueño y no autentica nada. Después abre
+`/pair#<código>` en el navegador — el código va en el *fragment*, así que nunca
+llega a un log ni a un referer — y esa página, con tu sesión, lo aprueba contra
+`POST /api/push-ingest/devices`. Ahí la fila queda atada a tu `user_id` y el
+token empieza a valer.
+
+Lo que se gana con ese orden: **el token existe en un solo lugar, el celular**.
+El servidor guarda su hash, no se puede recuperar de ninguna parte, y lo que sí
+viaja (el código) es de un solo uso y vence a los 10 minutos.
+
+Volver a tocar **Vincular** reusa el mismo token y resetea la fila, así que el
+teléfono queda *desvinculado hasta que apruebes de nuevo*. Es a propósito: una
+fila por teléfono, sin credenciales viejas dando vueltas.
+
+Un teléfono perdido se corta con `DELETE /api/push-ingest/devices` (`{id}`), que
+marca `revoked_at` en vez de borrar: la fila es contra lo que hashea el token, y
+tenerla es lo que hace que el rechazo sea deliberado.
+
+## PUSH_INGEST_SECRET
+
+Sigue funcionando como token de ingest — el servidor acepta el secreto compartido
+o un token de dispositivo — pero ya no hace falta para configurar la app. Está
+marcado `sensitive` en Vercel, o sea write-only: no se puede releer, solo rotar. Y
+el runtime lee las env vars del snapshot del deployment, así que hace falta
+redeployar para que el valor nuevo aplique:
 
 ```bash
 openssl rand -hex 32            # copialo antes de seguir: no se puede releer
