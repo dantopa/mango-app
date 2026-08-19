@@ -35,6 +35,12 @@ export type PipelineOptions = {
    * recorded weeks ago; the default is the live-ingest window.
    */
   maxPastDays?: number;
+  /**
+   * Retries a notification whose ingest-log row already exists, which normally
+   * stops the pipeline as a duplicate. Only for recovering rows a previous run
+   * failed on: a row that already produced a transaction is still refused.
+   */
+  force?: boolean;
 };
 
 /**
@@ -68,16 +74,58 @@ async function patchIngestLog(
 async function claimIngest(
   supabase: SupabaseAdmin,
   row: IngestLogInsert,
+  force: boolean,
 ): Promise<"claimed" | "already_claimed"> {
   const { error } = await supabase.from("push_ingest_log").insert(row);
   if (!error) return "claimed";
 
-  if (error.code === PG_UNIQUE_VIOLATION) return "already_claimed";
+  if (error.code === PG_UNIQUE_VIOLATION) {
+    return force ? reclaimIngest(supabase, row) : "already_claimed";
+  }
 
   // Any other failure means the row is missing and later status patches will be
   // no-ops, so the notification would go untracked. Log loudly and keep going:
   // registering the expense matters more than logging it.
   console.error(`[push-ingest][log] insert failed for ${row.dedup_key}:`, error.message);
+  return "claimed";
+}
+
+/**
+ * Takes over an ingest-log row a previous run left behind, clearing its error and
+ * stamping `reprocessed_at`.
+ *
+ * A row that already carries a transaction is never taken over — reprocessing it
+ * would register the same expense a second time. This is the last line of
+ * defence; the caller is expected to select retryable rows in the first place.
+ */
+async function reclaimIngest(
+  supabase: SupabaseAdmin,
+  row: IngestLogInsert,
+): Promise<"claimed" | "already_claimed"> {
+  const { data: existing, error } = await supabase
+    .from("push_ingest_log")
+    .select("transaction_id")
+    .eq("dedup_key", row.dedup_key)
+    .maybeSingle();
+
+  if (error || !existing) {
+    console.error(
+      `[push-ingest][log] reclaim of ${row.dedup_key} aborted:`,
+      error?.message ?? "row not found",
+    );
+    return "already_claimed";
+  }
+  if (existing.transaction_id) return "already_claimed";
+
+  const { error: patchError } = await supabase
+    .from("push_ingest_log")
+    .update({ ...row, error_message: null, reprocessed_at: new Date().toISOString() })
+    .eq("dedup_key", row.dedup_key);
+
+  if (patchError) {
+    console.error(`[push-ingest][log] reclaim of ${row.dedup_key} failed:`, patchError.message);
+    return "already_claimed";
+  }
   return "claimed";
 }
 
@@ -137,10 +185,13 @@ export async function executePipeline(
 
   const supabase = getSupabaseAdmin();
   const loadAccounts = accountLoader(supabase, OWNER_USER_ID);
+  const force = options.force ?? false;
 
   // 1. Dedup key — cheap pre-check; the authoritative gate is the insert below.
   const dedupKey = computeDedupKey(payload);
-  if (await isDuplicate(dedupKey)) return { status: "duplicate", dedup_key: dedupKey };
+  if (!force && (await isDuplicate(dedupKey))) {
+    return { status: "duplicate", dedup_key: dedupKey };
+  }
 
   // 2. Parse
   const parseResult = await runParsers(payload, OWNER_USER_ID, loadAccounts);
@@ -158,7 +209,7 @@ export async function executePipeline(
       package_name: payload.packageName,
       status: "ignored",
       error_message: parseResult.reason,
-    });
+    }, force);
     if (claim === "already_claimed") return { status: "duplicate", dedup_key: dedupKey };
     return { status: "ignored", reason: parseResult.reason };
   }
@@ -174,7 +225,7 @@ export async function executePipeline(
     native_currency: parsed.native_currency,
     merchant: parsed.merchant,
     status: "processing",
-  });
+  }, force);
   if (claim === "already_claimed") return { status: "duplicate", dedup_key: dedupKey };
 
   // 4. Resolve the account. This runs before FX and before any dedup query

@@ -64,6 +64,7 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
     new Set(SOURCES.map((s) => s.id))
   );
   const [gmailConnected, setGmailConnected] = React.useState<boolean | null>(null);
+  const [force, setForce] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
@@ -89,6 +90,7 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
     startSync({
       month,
       sources: SOURCES.filter((s) => selectedSources.has(s.id)).map((s) => s.id),
+      force,
     });
   }
 
@@ -169,6 +171,24 @@ export function SyncDialog({ open, onOpenChange }: SyncDialogProps) {
                 })}
               </div>
             </div>
+
+            {/* Only the notifications source can retry its own failed ingests. */}
+            {selectedSources.has("sync_notifications") && (
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={force}
+                  onChange={() => setForce((prev) => !prev)}
+                  className="mt-0.5 size-4 rounded border-border"
+                />
+                <span>
+                  Reprocesar notificaciones fallidas
+                  <span className="block text-xs text-muted-foreground">
+                    Reintenta las que quedaron sin transacción. Las ya registradas no se tocan.
+                  </span>
+                </span>
+              </label>
+            )}
 
             <Button
               onClick={handleStart}

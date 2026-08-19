@@ -46,7 +46,7 @@ export function useSync() {
   });
 
   const startSync = useCallback(
-    async (params: { month: string; sources: ClientSyncSource[] }) => {
+    async (params: { month: string; sources: ClientSyncSource[]; force?: boolean }) => {
       setProgress({
         current_source: null,
         completed: [],
@@ -64,8 +64,9 @@ export function useSync() {
           // Gmail: cursor-based loop
           await syncGmail(params.month, completed, errors, setProgress);
         } else if (source === "sync_notifications") {
-          // Notifications: single POST like legacy
-          await syncLegacySource("sync_notifications" as SyncSource, params.month, completed, errors, setProgress);
+          // Notifications: single POST like legacy. Only this source knows how to
+          // retry its own failed ingests, so `force` travels with it alone.
+          await syncLegacySource("sync_notifications", params.month, completed, errors, setProgress, params.force);
         } else {
           // Legacy sources: single POST
           await syncLegacySource(source, params.month, completed, errors, setProgress);
@@ -105,13 +106,14 @@ async function syncLegacySource(
   month: string,
   completed: SyncSourceResult[],
   errors: Array<{ source: ClientSyncSource; error: string }>,
-  setProgress: React.Dispatch<React.SetStateAction<SyncProgress>>
+  setProgress: React.Dispatch<React.SetStateAction<SyncProgress>>,
+  force?: boolean
 ) {
   try {
     const response = await fetch(SOURCE_ENDPOINTS[source], {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ month }),
+      body: JSON.stringify(force ? { month, force: true } : { month }),
     });
 
     if (!response.ok) {

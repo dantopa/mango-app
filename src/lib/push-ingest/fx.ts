@@ -111,16 +111,39 @@ async function fetchRate(
 }
 
 /**
+ * Rates are cached per currency for the life of the process (or 30 minutes,
+ * whichever ends first). Reprocessing a month replays hundreds of notifications
+ * that all need the same COP rate, and the free upstream API rate-limits, which
+ * surfaces as a batch of transactions stuck on `fx_pending`. Daily rates do not
+ * move within half an hour, and the rate is frozen into the row anyway.
+ */
+const RATE_TTL_MS = 30 * 60 * 1000;
+const rateCache = new Map<string, { rate: number; expiresAt: number }>();
+
+/**
  * Resolve rate for a native currency to USD.
  * If USD or USDT, return rate=1 without network call.
- * Otherwise fetch from FX service.
+ * Otherwise fetch from FX service (memoized).
  */
 export async function resolveRate(nativeCurrency: string): Promise<FxResult> {
   const upper = nativeCurrency.toUpperCase();
   if (upper === "USD" || upper === "USDT") {
     return { ok: true, rate: 1 };
   }
-  return getExchangeRate(upper, "USD");
+
+  const now = Date.now();
+  const cached = rateCache.get(upper);
+  if (cached && cached.expiresAt > now) {
+    return { ok: true, rate: cached.rate };
+  }
+
+  const result = await getExchangeRate(upper, "USD");
+  // Failures are not cached: the next notification should retry, not inherit
+  // the outage.
+  if (result.ok) {
+    rateCache.set(upper, { rate: result.rate, expiresAt: now + RATE_TTL_MS });
+  }
+  return result;
 }
 
 /**

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { PostgrestError } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
 import type {
@@ -36,6 +37,29 @@ export const DEFAULT_CLOSE_SOURCES: { source: string; item_type: string }[] = [
   { source: "Wise saldo", item_type: "saldo" },
 ];
 
+/**
+ * PostgREST truncates every response at `max_rows` (1000 on this project) and
+ * says nothing about it, so an unpaged select silently starts dropping the
+ * oldest rows once the table crosses that size — every total on every screen
+ * would then be wrong with no error to notice.
+ */
+const PAGE_SIZE = 1000;
+
+type Page<T> = PromiseLike<{ data: T[] | null; error: PostgrestError | null }>;
+
+/** Reads every row by ranges. The page query must have a unique tiebreaker sort. */
+async function fetchAllPages<T>(page: (from: number, to: number) => Page<T>): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
 export function useAccounts() {
   return useQuery({
     queryKey: queryKeys.accounts,
@@ -67,14 +91,15 @@ export function useCategories() {
 export function useSnapshots() {
   return useQuery({
     queryKey: queryKeys.snapshots,
-    queryFn: async (): Promise<NetWorthSnapshot[]> => {
-      const { data, error } = await supabase
-        .from("net_worth_snapshots")
-        .select("*")
-        .order("snapshot_date");
-      if (error) throw error;
-      return data;
-    },
+    queryFn: (): Promise<NetWorthSnapshot[]> =>
+      fetchAllPages((from, to) =>
+        supabase
+          .from("net_worth_snapshots")
+          .select("*")
+          .order("snapshot_date")
+          .order("id")
+          .range(from, to),
+      ),
   });
 }
 
@@ -82,14 +107,17 @@ export function useTransactions() {
   return useQuery({
     queryKey: queryKeys.transactions,
     queryFn: async (): Promise<TransactionWithRelations[]> => {
-      const { data, error } = await supabase
-        .from("transactions")
-        .select(
-          "*, account:accounts(id,name,type), category:categories(id,name,color)",
-        )
-        .order("tx_date", { ascending: false });
-      if (error) throw error;
-      return data as unknown as TransactionWithRelations[];
+      const rows = await fetchAllPages((from, to) =>
+        supabase
+          .from("transactions")
+          .select("*, account:accounts(id,name,type), category:categories(id,name,color)")
+          // `tx_date` repeats heavily, and ranges over a non-deterministic sort
+          // skip and duplicate rows, so `id` breaks the ties.
+          .order("tx_date", { ascending: false })
+          .order("id")
+          .range(from, to),
+      );
+      return rows as unknown as TransactionWithRelations[];
     },
   });
 }

@@ -17,37 +17,73 @@ import {
 
 export type NetWorthPoint = { date: string; total: number };
 
-/** Total net worth (sum of all account balances) per snapshot date, ascending. */
-export function netWorthByDate(snapshots: NetWorthSnapshot[]): NetWorthPoint[] {
-  const byDate = new Map<string, number>();
+/**
+ * Per-date balances with every account's last known value carried forward.
+ *
+ * Balances are loaded one account at a time, so most dates hold only a subset
+ * of them (in production: 6 to 10 of 14 accounts per date). Summing a date's
+ * own rows reads every account missing that day as zero, which turned the
+ * net-worth series into a sawtooth of "whatever was loaded that day" and made
+ * growth indistinguishable from an account being loaded for the first time.
+ *
+ * An account is carried forward until it gets a new snapshot; it never
+ * disappears from the series on its own. A closed account therefore needs a
+ * final zero snapshot, same as the per-account view already assumes.
+ */
+function balancesByDate(
+  snapshots: NetWorthSnapshot[],
+): { date: string; balances: Map<string, number> }[] {
+  const byDate = new Map<string, NetWorthSnapshot[]>();
   for (const s of snapshots) {
-    byDate.set(s.snapshot_date, (byDate.get(s.snapshot_date) ?? 0) + s.balance_usd);
+    const list = byDate.get(s.snapshot_date);
+    if (list) list.push(s);
+    else byDate.set(s.snapshot_date, [s]);
   }
-  return [...byDate.entries()]
-    .map(([date, total]) => ({ date, total }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const carried = new Map<string, number>();
+  return [...byDate.keys()]
+    .sort((a, b) => a.localeCompare(b))
+    .map((date) => {
+      for (const s of byDate.get(date)!) carried.set(s.account_id, s.balance_usd);
+      return { date, balances: new Map(carried) };
+    });
+}
+
+/** Total net worth (all accounts, last known balance) per snapshot date, ascending. */
+export function netWorthByDate(snapshots: NetWorthSnapshot[]): NetWorthPoint[] {
+  return balancesByDate(snapshots).map(({ date, balances }) => {
+    let total = 0;
+    for (const usd of balances.values()) total += usd;
+    return { date, total };
+  });
 }
 
 export type CompositionPoint = { date: string } & Record<string, number | string>;
 
-/** Stacked-area data: one row per date, one key per account (USD balance). */
+/**
+ * Stacked-area data: one row per date, one key per account (USD balance).
+ * Carries balances forward like the total series, so a stack does not collapse
+ * to zero on the dates that account was not reloaded.
+ */
 export function netWorthComposition(
   snapshots: NetWorthSnapshot[],
   accounts: Account[],
 ): { data: CompositionPoint[]; accountNames: string[] } {
   const nameById = new Map(accounts.map((a) => [a.id, a.name]));
-  const dates = [...new Set(snapshots.map((s) => s.snapshot_date))].sort();
-  const names = [...new Set(snapshots.map((s) => nameById.get(s.account_id) ?? "—"))];
+  const nameOf = (accountId: string) => nameById.get(accountId) ?? "—";
+  const names = [...new Set(snapshots.map((s) => nameOf(s.account_id)))];
 
-  const rows: Record<string, CompositionPoint> = {};
-  for (const d of dates) rows[d] = { date: d } as CompositionPoint;
-  for (const n of names) for (const d of dates) (rows[d][n] as number) = 0;
+  const data = balancesByDate(snapshots).map(({ date, balances }) => {
+    const row: CompositionPoint = { date };
+    for (const n of names) row[n] = 0;
+    for (const [accountId, usd] of balances) {
+      const name = nameOf(accountId);
+      row[name] = (row[name] as number) + usd;
+    }
+    return row;
+  });
 
-  for (const s of snapshots) {
-    const name = nameById.get(s.account_id) ?? "—";
-    rows[s.snapshot_date][name] = ((rows[s.snapshot_date][name] as number) ?? 0) + s.balance_usd;
-  }
-  return { data: dates.map((d) => rows[d]), accountNames: names };
+  return { data, accountNames: names };
 }
 
 export type NetWorthSummary = {
@@ -57,10 +93,38 @@ export type NetWorthSummary = {
   changePct: number | null;
 };
 
+/** Same day of the previous month, clamped when that month is shorter. */
+function oneMonthEarlier(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const prevYear = m === 1 ? y - 1 : y;
+  const prevMonth = m === 1 ? 12 : m - 1;
+  const daysInPrevMonth = new Date(y, m - 1, 0).getDate();
+  const day = Math.min(d, daysInPrevMonth);
+  return `${prevYear}-${String(prevMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Current total plus the change against a month earlier — which is what the UI
+ * labels it. Snapshots are not taken on fixed days (two consecutive days appear
+ * in production), so the previous *row* can be hours old; the comparison is
+ * anchored to the last date that is at least a month back instead. `previous`
+ * is null until there is that much history.
+ */
 export function netWorthSummary(snapshots: NetWorthSnapshot[]): NetWorthSummary {
   const series = netWorthByDate(snapshots);
-  const current = series.at(-1)?.total ?? 0;
-  const previous = series.length > 1 ? series.at(-2)!.total : null;
+  const latest = series.at(-1);
+  if (!latest) return { current: 0, previous: null, changeAbs: null, changePct: null };
+
+  const cutoff = oneMonthEarlier(latest.date);
+  let previous: number | null = null;
+  for (let i = series.length - 2; i >= 0; i--) {
+    if (series[i].date <= cutoff) {
+      previous = series[i].total;
+      break;
+    }
+  }
+
+  const current = latest.total;
   const changeAbs = previous === null ? null : current - previous;
   const changePct =
     previous === null || previous === 0 ? null : (current - previous) / previous;

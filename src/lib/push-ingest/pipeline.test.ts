@@ -196,6 +196,44 @@ describe("executePipeline", () => {
     expect(insertedTransaction()).toBeUndefined();
   });
 
+  describe("force reprocessing", () => {
+    beforeEach(() => {
+      // What a previous failed run left behind: the dedup key is taken, so the
+      // claim insert conflicts and the pre-check reports a duplicate.
+      insertErrors = { push_ingest_log: { code: "23505", message: "duplicate key value" } };
+      vi.mocked(isDuplicate).mockResolvedValue(true);
+    });
+
+    it("takes over a failed row and stamps reprocessed_at", async () => {
+      rows.push_ingest_log = [{ transaction_id: null }];
+
+      const result = await executePipeline(basePayload, "full_pipeline", { force: true });
+
+      expect(result.status).toBe("registered");
+      const reclaim = updates.find((u) => u.table === "push_ingest_log" && u.patch.reprocessed_at);
+      expect(reclaim?.patch).toMatchObject({ status: "processing", error_message: null });
+    });
+
+    it("refuses a row that already produced a transaction", async () => {
+      // Reprocessing this would register the same expense twice.
+      rows.push_ingest_log = [{ transaction_id: "tx-existing" }];
+
+      const result = await executePipeline(basePayload, "full_pipeline", { force: true });
+
+      expect(result.status).toBe("duplicate");
+      expect(insertedTransaction()).toBeUndefined();
+    });
+
+    it("still reports a duplicate without force", async () => {
+      rows.push_ingest_log = [{ transaction_id: null }];
+
+      const result = await executePipeline(basePayload, "full_pipeline");
+
+      expect(result.status).toBe("duplicate");
+      expect(insertedTransaction()).toBeUndefined();
+    });
+  });
+
   describe("parsing ladder", () => {
     it("returns 'no_parser' when nothing recognizes the notification", async () => {
       vi.mocked(getParser).mockReturnValue(undefined);

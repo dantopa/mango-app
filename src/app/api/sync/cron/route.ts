@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 
 export const maxDuration = 300;
 
+import { validateBearer } from "@/lib/push-ingest/auth";
 import { runGmailMonth } from "@/lib/sync/gmail/orchestrator";
 import { GmailAuthError } from "@/lib/sync/gmail/client";
 import type { GmailSyncCursor } from "@/lib/sync/gmail/types";
@@ -19,11 +20,10 @@ import type { SyncSourceResult } from "@/lib/sync/types";
  * their tokens expire in ~10 min and require manual trigger via the sync dialog.
  */
 export async function GET(request: NextRequest) {
-  // 1. Verify cron auth
-  const authHeader = request.headers.get("authorization");
-  const expectedToken = process.env.SYNC_CRON_SECRET;
-
-  if (!expectedToken || authHeader !== `Bearer ${expectedToken}`) {
+  // 1. Verify cron auth — constant-time, so the token cannot be recovered
+  // character by character from response timings.
+  const auth = validateBearer(request.headers.get("authorization"), process.env.SYNC_CRON_SECRET);
+  if (!auth.ok) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

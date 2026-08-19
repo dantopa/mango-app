@@ -21,8 +21,15 @@ const UNAUTHORIZED: AuthResult = {
  * - The token matches PUSH_INGEST_SECRET exactly
  */
 export function validateAuth(authHeader: string | null): AuthResult {
-  const secret = process.env.PUSH_INGEST_SECRET;
+  return validateBearer(authHeader, process.env.PUSH_INGEST_SECRET);
+}
 
+/**
+ * Same check against an arbitrary secret, for the other endpoints that are
+ * protected by a shared token (the cron trigger). An undefined secret rejects
+ * everything, so a missing env var fails closed instead of open.
+ */
+export function validateBearer(authHeader: string | null, secret: string | undefined): AuthResult {
   // If secret is not configured, reject all requests
   if (!secret) {
     return UNAUTHORIZED;
