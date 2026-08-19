@@ -1,6 +1,6 @@
 import type { GmailSourceDef, ParsedEmail } from "../types";
 import type { CandidateTransaction } from "../../types";
-import { parseCopAmount, normalizeDate } from "../money";
+import { parseCopAmount, normalizeDate, internalDateToLocal } from "../money";
 
 // --- Extraction regexes ---
 // Note: html-to-text may produce newlines between label and value (table layout),
@@ -31,20 +31,6 @@ function buildQuery(month: string): string {
   const beforeDate = `${nextYear}/${String(nextMonth).padStart(2, "0")}/01`;
 
   return `from:(noreply@rappicard.co) subject:("Resumen de transacción") after:${afterDate} before:${beforeDate}`;
-}
-
-/**
- * Convert epoch ms internalDate to YYYY-MM-DD in America/Bogota (UTC-5).
- */
-function internalDateToLocal(epochMs: string): string {
-  const ms = parseInt(epochMs, 10);
-  // America/Bogota is UTC-5 (no DST)
-  const offsetMs = 5 * 60 * 60 * 1000;
-  const local = new Date(ms - offsetMs);
-  const y = local.getUTCFullYear();
-  const m = String(local.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(local.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
 }
 
 /**

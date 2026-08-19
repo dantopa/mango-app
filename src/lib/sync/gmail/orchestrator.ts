@@ -7,6 +7,7 @@ import type { GmailSourceDef, GmailSourceId, GmailSyncCursor, GmailSyncResponse 
 import { refreshAccessToken, listMessageIds, getMessage } from "./client";
 import { GmailAuthError } from "./client";
 import { markCloseItem } from "./close-items";
+import { learnFromEmail, tryLearnedTemplates } from "./learned-parser";
 import { GMAIL_SOURCES } from "./sources";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
@@ -128,6 +129,17 @@ const RE_INGRESO = /recibiste (una transferencia|un pago)/i;
 const MESSAGE_CHUNK_SIZE = 20;
 
 /**
+ * AI calls this source may spend teaching itself new formats, per request.
+ *
+ * Beyond the cap the email is left unlogged and the source reports itself
+ * exhausted, so the client resumes it with a fresh budget instead of burning the
+ * request deadline. This terminates because every AI call that actually happens
+ * settles its email — as a transaction, as a stored `ignore` pattern, or as a
+ * `no_parser` row — so no email can be offered to the model twice.
+ */
+const MAX_LEARN_CALLS_PER_SOURCE = 6;
+
+/**
  * Run a single Gmail sub-source: list → filter processed → fetch & parse → processCandidates.
  *
  * Returns partial results + exhausted flag when time budget runs out.
@@ -141,6 +153,7 @@ export async function runGmailSource(
   budgetMs: number
 ): Promise<{ result: SyncSourceResult; exhausted: boolean }> {
   const startTime = Date.now();
+  let learnCalls = 0;
 
   const result: SyncSourceResult = {
     source: sourceDef.syncSource,
@@ -206,22 +219,49 @@ export async function runGmailSource(
         const email = await getMessage(accessToken, messageId);
 
         // 3b. Parse
-        const candidates = sourceDef.parse(email);
+        let candidates = sourceDef.parse(email);
 
-        // 3c. Empty parse result → log and continue
+        // 3c. The hand-written parser found nothing. Try the learned patterns,
+        //     and only if those miss too, spend an AI call to learn this format.
         if (candidates.length === 0) {
-          // Detect ingresos (transfers IN) for Bancolombia
-          const isIngreso = RE_INGRESO.test(email.bodyText);
+          // Ingresos are settled here: money coming in is never an expense, and
+          // that is cheap to decide without a model.
+          if (RE_INGRESO.test(email.bodyText)) {
+            await logProcessedEmail({
+              messageId,
+              sourceId: sourceDef.id,
+              status: "transfer",
+              errorMessage: "Ingreso detectado (transferencia/pago recibido)",
+            });
+            continue;
+          }
 
-          await logProcessedEmail({
-            messageId,
-            sourceId: sourceDef.id,
-            status: isIngreso ? "transfer" : "no_parser",
-            errorMessage: isIngreso
-              ? "Ingreso detectado (transferencia/pago recibido)"
-              : "Parser returned empty",
-          });
-          continue;
+          let learned = await tryLearnedTemplates(email, sourceDef, userId);
+
+          if (learned.kind === "unknown") {
+            if (learnCalls >= MAX_LEARN_CALLS_PER_SOURCE) {
+              // Deliberately not logged: the email has to stay available so the
+              // next request can still learn from it.
+              return { result, exhausted: true };
+            }
+            learnCalls++;
+            learned = await learnFromEmail(email, sourceDef, userId);
+          }
+
+          if (learned.kind === "transaction") {
+            candidates = learned.candidates;
+          } else {
+            await logProcessedEmail({
+              messageId,
+              sourceId: sourceDef.id,
+              status: "no_parser",
+              errorMessage:
+                learned.kind === "ignore"
+                  ? "Descartado: no es un gasto (plantilla aprendida)"
+                  : "Parser returned empty",
+            });
+            continue;
+          }
         }
 
         // 3d. Process candidates through the engine

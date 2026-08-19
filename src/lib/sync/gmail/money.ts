@@ -45,6 +45,22 @@ export function parseCopAmount(raw: string): number {
 }
 
 /**
+ * Convert epoch ms internalDate to YYYY-MM-DD in America/Bogota (UTC-5, no DST).
+ *
+ * The fallback for every source that cannot find a date in the body: the day the
+ * email arrived is the closest thing to the day of the purchase.
+ */
+export function internalDateToLocal(epochMs: string): string {
+  const ms = parseInt(epochMs, 10);
+  const offsetMs = 5 * 60 * 60 * 1000;
+  const local = new Date(ms - offsetMs);
+  const y = local.getUTCFullYear();
+  const m = String(local.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(local.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
  * Normalize date string (DD/MM/YY or DD/MM/YYYY) to ISO YYYY-MM-DD.
  */
 export function normalizeDate(dateStr: string): string {
