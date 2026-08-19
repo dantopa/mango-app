@@ -4,14 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
-      The sensor's watchdog (SensorService). specialUse rather than dataSync
-      because the Android 15 timeout caps dataSync at 6 h/day and this has to
-      outlive that; the subtype below is the declaration that goes with it.
+      To tell the user the sensor lost its access, and for the notifications the
+      dashboard delegates to this app. Nothing else here posts anything.
     -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- Only to show the sensor's status; nothing here alerts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
@@ -176,23 +171,8 @@
         </service>
 
         <!--
-          Watchdog for the service above. Not exported: only this app starts it.
+          SensorWatchdog needs no declaration: WorkManager's own provider registers
+          its workers, and reschedules them after a reboot.
         -->
-        <service
-            android:name=".SensorService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Monitors that the notification listener is still bound so expense capture cannot fail silently." />
-        </service>
-
-        <receiver
-            android:name=".BootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

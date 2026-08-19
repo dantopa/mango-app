@@ -21,7 +21,7 @@ class NotificationReaderService : NotificationListenerService() {
     /**
      * The system decides when this service is bound, and these two callbacks are
      * the only honest answer to whether it is listening right now. The flag lives
-     * in a static because SensorService runs in the same process — if that process
+     * in a static because SensorWatchdog runs in the same process — if that process
      * was killed the flag is gone with it, which is the correct answer.
      */
     override fun onListenerConnected() {

@@ -48,14 +48,14 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // Every visit to this screen is also a chance to restore the watchdog, in
-        // case the system stopped it while the app was away.
-        SensorService.start(this)
+        // case the system dropped its schedule while the app was away.
+        SensorWatchdog.schedule(this)
         refreshStatus()
     }
 
     /**
-     * The watchdog runs either way, but on API 33+ its status notification — the
-     * only place a broken sensor is visible — is dropped without this permission.
+     * The watchdog runs either way, but on API 33+ its warning — the only thing that
+     * says the sensor lost its access — is dropped without this permission.
      */
     private fun askForNotifications() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return

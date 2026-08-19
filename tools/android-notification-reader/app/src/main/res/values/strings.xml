@@ -38,10 +38,7 @@
     <string name="sensor_fix">Arreglarlo</string>
     <string name="sensor_ignore">Ver el panel igual</string>
 
-    <!-- Persistent notification posted by SensorService. -->
+    <!-- Posted by SensorWatchdog, and only while the access is missing. -->
     <string name="sensor_channel_name">Estado del lector</string>
-    <string name="sensor_notification_title">Lector de gastos</string>
-    <string name="sensor_status_active">Activo: tus compras se están registrando</string>
-    <string name="sensor_status_rebinding">Reconectando con el sistema…</string>
     <string name="sensor_status_no_access">Falta el acceso a notificaciones. Tocá para arreglarlo.</string>
 </resources>

@@ -24,8 +24,8 @@ class LauncherActivity : TwaLauncherActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Opening the dashboard is the most frequent thing that happens to this app,
-        // so it is also the cheapest place to make sure the watchdog is running.
-        SensorService.start(this)
+        // so it is also the cheapest place to make sure the watchdog is scheduled.
+        SensorWatchdog.schedule(this)
         val problem = sensorProblem() ?: return
         warn(problem)
     }
