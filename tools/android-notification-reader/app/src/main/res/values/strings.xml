@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Maquinita Reader</string>
+    <string name="endpoint_label">URL del endpoint</string>
+    <string name="endpoint_hint">https://tu-app.vercel.app/api/push-ingest</string>
+    <string name="token_label">Token (PUSH_INGEST_SECRET)</string>
+    <string name="save">Guardar</string>
+    <string name="grant_access">Dar acceso a notificaciones</string>
+    <string name="send_test">Enviar prueba</string>
+    <string name="refresh">Actualizar estado</string>
+    <string name="saved">Configuración guardada</string>
+    <string name="invalid_endpoint">La URL tiene que empezar con https://</string>
+    <string name="missing_token">Falta el token</string>
+    <string name="test_queued">Prueba encolada</string>
+</resources>

@@ -47,6 +47,15 @@ supabase/.temp/
 # vercel
 .vercel
 
+# android reader (gradle build output + local SDK path)
+tools/android-notification-reader/.gradle/
+tools/android-notification-reader/build/
+tools/android-notification-reader/app/build/
+tools/android-notification-reader/local.properties
+tools/android-notification-reader/gradle/wrapper/gradle-wrapper.jar
+tools/android-notification-reader/gradlew
+tools/android-notification-reader/gradlew.bat
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
