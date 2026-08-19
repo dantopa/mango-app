@@ -26,6 +26,18 @@ notificaciones llegan con la app cerrada, cuando no existe ninguna Activity ni
 ningún WebView. El POST es el límite de durabilidad — es lo que hace que una
 compra sin señal quede encolada y entre después.
 
+## Splash
+
+El arranque tapa la carga entera: `LauncherActivity` dibuja el logo sobre
+`theme_background` desde el primer frame, y después le pasa la **misma** imagen a
+Chrome, que la sostiene hasta que la página pinta y recién ahí hace un fade de
+300 ms. Sin eso se ve una ventana translúcida y después un viewport vacío, que es
+justo lo que hace parecer que la app está rota.
+
+El traspaso a Chrome es por qué hay un `FileProvider`: androidbrowserhelper
+escribe el PNG en `files/twa_splash/` y le pasa un content URI. El provider no
+está exportado y `@xml/filepaths` lo limita a ese directorio.
+
 ## Cómo funciona el sensor
 
 1. `NotificationReaderService` recibe cada notificación, descarta todo lo que no

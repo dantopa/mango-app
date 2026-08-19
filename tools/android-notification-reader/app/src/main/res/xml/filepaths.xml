@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only thing this app ever shares: the splash image, which
+     androidbrowserhelper writes to files/twa_splash/ and hands to Chrome as a
+     content URI so it can keep showing it until the page paints. -->
+<paths>
+    <files-path
+        name="twa_splash"
+        path="twa_splash/" />
+</paths>

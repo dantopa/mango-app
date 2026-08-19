@@ -50,6 +50,26 @@
                 android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
                 android:resource="@color/theme_background" />
 
+            <!--
+              Splash screen. Without it the launch is a translucent window followed
+              by an empty Chrome viewport, which reads as a broken app; with it the
+              logo is on screen from the first frame and the *browser* holds it
+              until the page paints, then fades. That handoff is why the image has
+              to be shareable — hence the FileProvider below.
+            -->
+            <meta-data
+                android:name="android.support.customtabs.trusted.SPLASH_IMAGE_DRAWABLE"
+                android:resource="@mipmap/ic_launcher_foreground" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.SPLASH_SCREEN_BACKGROUND_COLOR"
+                android:resource="@color/theme_background" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.SPLASH_SCREEN_FADE_OUT_DURATION"
+                android:value="300" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.FILE_PROVIDER_AUTHORITY"
+                android:value="com.maquinita.reader.fileprovider" />
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -80,6 +100,21 @@
             android:name=".MainActivity"
             android:exported="false"
             android:label="@string/reader_config" />
+
+        <!--
+          Only exists to hand the splash image to Chrome. Not exported and scoped
+          to one directory (@xml/filepaths), so it is not a way into this app's
+          files: the URI is granted per launch, to the browser, for one PNG.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.maquinita.reader.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/filepaths" />
+        </provider>
 
         <!--
           Bound by the system, so it must be exported; the BIND permission is what
