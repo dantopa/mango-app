@@ -134,8 +134,8 @@ para apps que no vienen de una store. Si el toggle aparece gris: Info de la app 
 menú ⋮ → *Permitir ajustes restringidos*.
 
 El estado de la pantalla (acceso activo, pendientes en cola, último envío) es lo
-que hay que mirar si dejan de aparecer gastos. Del lado del servidor, el cron
-diario avisa por push si pasan más de 48 h sin notificaciones.
+que hay que mirar si dejan de aparecer gastos: no hay ninguna alerta del lado del
+servidor.
 
 ## Rotar el token
 
@@ -154,5 +154,4 @@ vercel --prod                   # el valor nuevo no aplica hasta redeployar
 `ForegroundService` para persistencia de proceso, que el spec en
 `.kiro/specs/android-notification-forwarder/` pide y todavía no está. Sin eso, en
 Doze mode o con el optimizador de batería de Samsung/Xiaomi el sistema puede matar
-el listener y dejás de recibir notificaciones sin enterarte — la alerta de 48 h
-del cron avisa, pero es mejor que no pase.
+el listener y dejás de recibir notificaciones sin enterarte.
