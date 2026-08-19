@@ -1,7 +1,10 @@
 package com.maquinita.reader
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -38,11 +41,29 @@ class MainActivity : Activity() {
         }
         findViewById<Button>(R.id.sendTest).setOnClickListener { sendTest() }
         findViewById<Button>(R.id.refresh).setOnClickListener { refreshStatus() }
+
+        askForNotifications()
     }
 
     override fun onResume() {
         super.onResume()
+        // Every visit to this screen is also a chance to restore the watchdog, in
+        // case the system stopped it while the app was away.
+        SensorService.start(this)
         refreshStatus()
+    }
+
+    /**
+     * The watchdog runs either way, but on API 33+ its status notification — the
+     * only place a broken sensor is visible — is dropped without this permission.
+     */
+    private fun askForNotifications() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) return
+
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
     }
 
     /**
@@ -104,6 +125,9 @@ class MainActivity : Activity() {
         statusView.text = listOf(
             "servidor: ${settings.endpoint}",
             "acceso a notificaciones: " + if (listenerEnabled) "activo" else "NO ACTIVO",
+            // Access granted is not the same as bound: this is the one that decides
+            // whether a purchase notification actually reaches the app.
+            "lector conectado: " + if (NotificationReaderService.isConnected) "sí" else "NO",
             "teléfono vinculado: " + if (settings.isConfigured) "sí" else "NO",
             "pendientes en cola: ${IngestQueue.size(applicationContext)}",
             "último envío: $lastResult",
@@ -115,6 +139,7 @@ class MainActivity : Activity() {
     }
 
     private companion object {
+        const val REQUEST_NOTIFICATIONS = 1
         val TIME_FORMAT = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
     }
 }

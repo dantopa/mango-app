@@ -1,6 +1,7 @@
 package com.maquinita.reader
 
 import android.app.Notification
+import android.content.ComponentName
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import org.json.JSONObject
@@ -16,6 +17,23 @@ import org.json.JSONObject
  * Keep in sync with src/lib/push-ingest/package-whitelist.ts.
  */
 class NotificationReaderService : NotificationListenerService() {
+
+    /**
+     * The system decides when this service is bound, and these two callbacks are
+     * the only honest answer to whether it is listening right now. The flag lives
+     * in a static because SensorService runs in the same process — if that process
+     * was killed the flag is gone with it, which is the correct answer.
+     */
+    override fun onListenerConnected() {
+        connected = true
+    }
+
+    override fun onListenerDisconnected() {
+        connected = false
+        // The documented recovery. Without it a lost binding stays lost until the
+        // user toggles the permission by hand, and nothing on screen says so.
+        requestRebind(ComponentName(this, NotificationReaderService::class.java))
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName !in WHITELIST) return
@@ -61,8 +79,14 @@ class NotificationReaderService : NotificationListenerService() {
         return FINANCIAL_SIGNAL.containsMatchIn(message) && !ONE_TIME_CODE.containsMatchIn(message)
     }
 
-    private companion object {
-        val SMS_PACKAGES = setOf(
+    companion object {
+        @Volatile
+        private var connected = false
+
+        /** Whether the system has this listener bound right now. */
+        val isConnected: Boolean get() = connected
+
+        private val SMS_PACKAGES = setOf(
             "com.google.android.apps.messaging",
             "com.samsung.android.messaging",
             "com.android.mms",
@@ -71,21 +95,21 @@ class NotificationReaderService : NotificationListenerService() {
         // Nexo and other foreign services write in English, so both languages are
         // matched. A brand name alone counts as a signal, which is why the one-time
         // code list below has to cover both languages too.
-        val FINANCIAL_SIGNAL = Regex(
+        private val FINANCIAL_SIGNAL = Regex(
             "bancolombia|nequi|bbva|rappi|nexo|davivienda|" +
                 "compra|transacci[oó]n|d[eé]bito|cr[eé]dito|retiro|pago|transferencia|consumo|" +
                 "purchase|transaction|debit|credit card|withdraw|payment|transfer|charged",
             RegexOption.IGNORE_CASE,
         )
 
-        val ONE_TIME_CODE = Regex(
+        private val ONE_TIME_CODE = Regex(
             "c[oó]digo|clave (?:temporal|din[aá]mica|segura)|token|\\botp\\b|" +
                 "verificaci[oó]n|no la compartas|no lo compartas|" +
                 "\\bcode\\b|verification|passcode|one[- ]time|do(?:n't| not) share",
             RegexOption.IGNORE_CASE,
         )
 
-        val WHITELIST = setOf(
+        private val WHITELIST = setOf(
             // Banking apps
             "com.todo1.mobile",                     // Bancolombia
             "com.bbva.nxt_argentina",               // BBVA Argentina
