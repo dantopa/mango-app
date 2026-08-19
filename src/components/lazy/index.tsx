@@ -45,6 +45,14 @@ export const LazySyncDialog = dynamic(
   { ssr: false }
 );
 
+export const LazyDuplicatesDialog = dynamic(
+  () =>
+    import("@/components/duplicates-dialog").then((m) => ({
+      default: m.DuplicatesDialog,
+    })),
+  { ssr: false }
+);
+
 export const LazyGoalFormDialog = dynamic(
   () =>
     import("@/components/goal-form-dialog").then((m) => ({

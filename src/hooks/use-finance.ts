@@ -214,6 +214,19 @@ export function useDeleteTransaction() {
   });
 }
 
+/** Bulk delete, for the duplicate audit: one round trip, all or nothing. */
+export function useDeleteTransactions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const { error } = await supabase.from("transactions").delete().in("id", ids);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+  });
+}
+
 async function getUserId(): Promise<string> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error("No hay sesión activa");

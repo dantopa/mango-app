@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Bike, Car, Filter, Receipt, RefreshCw, Sparkle, X } from "lucide-react";
+import { Bike, Car, CopyCheck, Filter, Receipt, RefreshCw, Sparkle, X } from "lucide-react";
 
 import { useAccounts, useCategories, useTransactions } from "@/hooks/use-finance";
 import {
@@ -31,7 +31,12 @@ import { ChangeIndicator } from "@/components/change-indicator";
 import { FilterChips, type ChipOption } from "@/components/filter-chips";
 import { LoadingState, ErrorState, EmptyState } from "@/components/states";
 import { TransactionsTable } from "@/components/transactions-table";
-import { LazyCategoryPieChart, LazyCategoryBarChart, LazySyncDialog } from "@/components/lazy";
+import {
+  LazyCategoryPieChart,
+  LazyCategoryBarChart,
+  LazyDuplicatesDialog,
+  LazySyncDialog,
+} from "@/components/lazy";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -62,6 +67,7 @@ export default function GastosPage() {
   const [excludeExtra, setExcludeExtra] = React.useState(false);
   const [filters, setFilters] = React.useState<SpendFilters>(emptyFilters);
   const [syncOpen, setSyncOpen] = React.useState(false);
+  const [duplicatesOpen, setDuplicatesOpen] = React.useState(false);
 
   const months = React.useMemo(
     () => (txns.data ? monthsPresent(txns.data) : []),
@@ -165,6 +171,10 @@ export default function GastosPage() {
               <RefreshCw className="mr-1.5 size-4" />
               Sincronizar
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setDuplicatesOpen(true)}>
+              <CopyCheck className="mr-1.5 size-4" />
+              Duplicados
+            </Button>
             <label className="flex items-center justify-between gap-2 text-sm text-muted-foreground sm:justify-start">
               Excluir extraordinarios
               <Switch checked={excludeExtra} onCheckedChange={setExcludeExtra} />
@@ -185,6 +195,11 @@ export default function GastosPage() {
         }
       />
       <LazySyncDialog open={syncOpen} onOpenChange={setSyncOpen} />
+      <LazyDuplicatesDialog
+        open={duplicatesOpen}
+        onOpenChange={setDuplicatesOpen}
+        month={selectedMonth}
+      />
 
       {/* Pattern stats */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
