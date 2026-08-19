@@ -10,11 +10,11 @@ import {
   Target,
   CalendarCheck,
   Settings,
-  Sparkles,
   LogOut,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { OptimizedImage } from "@/components/optimized-image";
 import { Button } from "@/components/ui/button";
 import { PushNotificationToggle } from "@/components/push-notification-toggle";
 import { PendingConfirmations } from "@/components/pending-confirmations";
@@ -52,9 +52,15 @@ export function AppShell({
 
   const brand = (
     <Link href="/" prefetch={true} onTouchStart={() => {}} className="flex items-center gap-2 transition-transform duration-50 active:scale-95 active:opacity-80">
-      <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-        <Sparkles className="size-4" />
-      </div>
+      {/* Decorative: the wordmark next to it already says the name. */}
+      <OptimizedImage
+        src="/logo-mark.png"
+        alt=""
+        width={320}
+        height={253}
+        priority
+        className="h-8 w-auto"
+      />
       <span className="text-lg font-semibold tracking-tight">Maquinita</span>
     </Link>
   );

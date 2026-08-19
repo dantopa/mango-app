@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
+import { OptimizedImage } from "@/components/optimized-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -99,9 +100,15 @@ export default function LoginPage() {
     <div className="flex min-h-dvh items-center justify-center bg-background p-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex items-center justify-center gap-2">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Sparkles className="size-5" />
-          </div>
+          {/* Decorative: the wordmark next to it already says the name. */}
+          <OptimizedImage
+            src="/logo-mark.png"
+            alt=""
+            width={320}
+            height={253}
+            priority
+            className="h-9 w-auto"
+          />
           <span className="text-xl font-semibold tracking-tight">Maquinita</span>
         </div>
 
