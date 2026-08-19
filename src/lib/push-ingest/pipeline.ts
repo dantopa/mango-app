@@ -394,14 +394,14 @@ export async function executePipeline(
   // action === "insert" → continue pipeline normally
 
   // 11. Categorize (deterministic first, AI fallback)
-  const catResult = await categorize(resolved.merchant, OWNER_USER_ID);
+  const catResult = await categorize(resolved.merchant, OWNER_USER_ID, resolved.description_raw);
   let categoryId: string | null = null;
   let catMatched = false;
 
   if (catResult.matched) {
     categoryId = catResult.category_id;
     catMatched = true;
-  } else if (resolved.merchant) {
+  } else {
     const aiResult = await categorizeWithAi(resolved.merchant, resolved.description_raw, OWNER_USER_ID);
     if (aiResult.matched) {
       categoryId = aiResult.category_id;

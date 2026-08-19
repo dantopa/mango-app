@@ -102,11 +102,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // Categorize
-  const catResult = await categorize(parsed.merchant, OWNER_USER_ID);
+  const catResult = await categorize(parsed.merchant, OWNER_USER_ID, parsed.description_raw);
   let categoryId: string | null = null;
   if (catResult.matched) {
     categoryId = catResult.category_id;
-  } else if (parsed.merchant) {
+  } else {
     const aiResult = await categorizeWithAi(parsed.merchant, parsed.description_raw, OWNER_USER_ID);
     if (aiResult.matched) categoryId = aiResult.category_id;
   }

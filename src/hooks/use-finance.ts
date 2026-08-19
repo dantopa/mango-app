@@ -13,6 +13,7 @@ import type {
   TransactionWithRelations,
 } from "@/lib/types";
 import type { GoalFormValues, TransactionEditValues } from "@/lib/schemas";
+import { extractPattern, isUsablePattern } from "@/lib/push-ingest/pattern";
 
 const supabase = createClient();
 
@@ -148,8 +149,57 @@ export function useUpdateTransaction() {
     }) => {
       const { error } = await supabase.from("transactions").update(values).eq("id", id);
       if (error) throw error;
+
+      if (values.category_id) await learnCategoryRule(id, values.category_id);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+  });
+}
+
+/**
+ * Turn a manual re-categorization into a rule, so the same merchant never comes
+ * back asking again. This is the counterpart of the AI's own rule writing: same
+ * table, but priority 0 instead of -10, so a correction always outranks whatever
+ * the model had guessed.
+ *
+ * Best-effort by design — the transaction is already saved, and failing to learn
+ * from it is not worth surfacing an error over.
+ */
+async function learnCategoryRule(txId: string, categoryId: string): Promise<void> {
+  const { data: tx } = await supabase
+    .from("transactions")
+    .select("user_id, merchant")
+    .eq("id", txId)
+    .single();
+
+  // No merchant means the counterparty is buried in the raw text, and picking it
+  // out is the AI's job, not a guess made here.
+  if (!tx?.merchant) return;
+
+  const pattern = extractPattern(tx.merchant);
+  if (!pattern || !isUsablePattern(pattern, tx.merchant)) return;
+
+  const { data: existing } = await supabase
+    .from("merchant_category_rules")
+    .select("id")
+    .eq("user_id", tx.user_id)
+    .eq("pattern", pattern)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase
+      .from("merchant_category_rules")
+      .update({ category_id: categoryId, priority: 0 })
+      .eq("id", existing.id);
+    return;
+  }
+
+  await supabase.from("merchant_category_rules").insert({
+    user_id: tx.user_id,
+    pattern,
+    match_type: "ilike",
+    category_id: categoryId,
+    priority: 0,
   });
 }
 

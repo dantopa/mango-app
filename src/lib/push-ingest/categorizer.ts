@@ -13,33 +13,50 @@ type MerchantRule = {
 };
 
 /**
- * Check if a merchant matches a rule pattern based on match_type.
+ * Check if the text matches a rule pattern based on match_type.
  * - 'ilike': case-insensitive substring match (equivalent to SQL ILIKE '%pattern%')
  * - 'regex': full regex match
  */
-function matchesRule(merchant: string, rule: MerchantRule): boolean {
+function matchesRule(text: string, rule: MerchantRule): boolean {
   if (rule.match_type === "regex") {
     try {
       const re = new RegExp(rule.pattern, "i");
-      return re.test(merchant);
+      return re.test(text);
     } catch {
       return false;
     }
   }
 
   // Default: ilike — case-insensitive substring match
-  return merchant.toLowerCase().includes(rule.pattern.toLowerCase());
+  return text.toLowerCase().includes(rule.pattern.toLowerCase());
 }
 
 /**
- * Look up merchant in merchant_category_rules for a given user.
+ * Resolve which text a rule is tested against.
+ *
+ * A Bancolombia transfer or QR payment has no merchant at all — its counterparty
+ * is an account number or a llave sitting inside the raw text. Falling back to
+ * `description_raw` is what makes those reachable by a rule; before this, they
+ * were a dead end that landed in "para revisión" forever.
+ */
+export function matchTarget(
+  merchant: string | null,
+  descriptionRaw?: string | null,
+): string | null {
+  return merchant ?? descriptionRaw ?? null;
+}
+
+/**
+ * Look up a transaction in merchant_category_rules for a given user.
  * Returns the highest-priority matching rule, or { matched: false }.
  */
 export async function categorize(
   merchant: string | null,
   userId: string,
+  descriptionRaw?: string | null,
 ): Promise<CategorizationResult> {
-  if (merchant === null) {
+  const target = matchTarget(merchant, descriptionRaw);
+  if (target === null) {
     return { matched: false };
   }
 
@@ -56,7 +73,7 @@ export async function categorize(
   }
 
   for (const rule of rules) {
-    if (matchesRule(merchant, rule)) {
+    if (matchesRule(target, rule)) {
       return { matched: true, category_id: rule.category_id, rule_id: rule.id };
     }
   }

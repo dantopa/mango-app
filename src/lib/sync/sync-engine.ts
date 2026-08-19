@@ -6,8 +6,19 @@ import { categorizeWithAi } from "../push-ingest/ai-categorizer";
 import { classifyTransaction } from "../push-ingest/classifier";
 import { getSupabaseAdmin } from "../push-ingest/supabase-admin";
 
-/** Max AI categorization calls per processCandidates batch to control cost/time */
-const MAX_AI_CALLS_PER_BATCH = 5;
+/**
+ * Max AI categorization calls per processCandidates batch to control cost/time.
+ *
+ * The cost is not the constraint — each call is ~300 in + ~40 out tokens on the
+ * cheapest model, so a full batch is well under a cent. The constraint is the
+ * request deadline: every call is a round trip. What is left over is picked up by
+ * `recategorizeMonth` at the end of the sync, and by the next run.
+ */
+const MAX_AI_CALLS_PER_BATCH = 15;
+
+/** Same idea for the mop-up pass, which additionally watches the clock. */
+const MAX_AI_CALLS_PER_RECATEGORIZE = 25;
+const RECATEGORIZE_AI_BUDGET_MS = 20_000;
 
 /**
  * Procesa un batch de candidatas: dedup → FX → classify → categorize → insert.
@@ -116,7 +127,11 @@ export async function processCandidates(
       const isPayment = classification.type === "transfer";
 
       // 4. Categorize (deterministic first, AI fallback)
-      const categorizationResult = await categorize(candidate.merchant, userId);
+      const categorizationResult = await categorize(
+        candidate.merchant,
+        userId,
+        candidate.description_raw
+      );
 
       let categoryId: string | null = null;
       let categorizationMatched = false;
@@ -124,7 +139,7 @@ export async function processCandidates(
       if (categorizationResult.matched) {
         categoryId = categorizationResult.category_id;
         categorizationMatched = true;
-      } else if (candidate.merchant && aiCallCount < MAX_AI_CALLS_PER_BATCH) {
+      } else if (aiCallCount < MAX_AI_CALLS_PER_BATCH) {
         // AI fallback — also auto-creates a rule for next time
         aiCallCount++;
         const aiResult = await categorizeWithAi(
@@ -246,11 +261,15 @@ export async function recategorizeMonth(
     .lte("tx_date", monthEnd);
 
   if (uncategorized && uncategorized.length > 0) {
-    for (const tx of uncategorized as Array<{ id: string; merchant: string | null; description_raw: string }>) {
-      if (!tx.merchant) continue;
+    // A transfer or QR payment has no merchant. Those are precisely the rows that
+    // accumulate in "para revisión", so they are no longer skipped: the rule and
+    // the AI both fall back to description_raw.
+    let aiCallCount = 0;
+    const startedAt = Date.now();
 
+    for (const tx of uncategorized as Array<{ id: string; merchant: string | null; description_raw: string }>) {
       // Try deterministic rules first
-      const ruleResult = await categorize(tx.merchant, userId);
+      const ruleResult = await categorize(tx.merchant, userId, tx.description_raw);
       if (ruleResult.matched) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (supabase as any)
@@ -261,7 +280,16 @@ export async function recategorizeMonth(
         continue;
       }
 
-      // AI fallback
+      // AI fallback, bounded by both a call cap and the clock: the request has a
+      // deadline, and whatever is left over is picked up by the next run.
+      if (
+        aiCallCount >= MAX_AI_CALLS_PER_RECATEGORIZE ||
+        Date.now() - startedAt > RECATEGORIZE_AI_BUDGET_MS
+      ) {
+        continue;
+      }
+      aiCallCount++;
+
       const aiResult = await categorizeWithAi(tx.merchant, tx.description_raw, userId);
       if (aiResult.matched) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

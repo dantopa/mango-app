@@ -5,6 +5,7 @@ export const maxDuration = 60;
 
 import { createClient } from "@/lib/supabase/server";
 import { runGmailMonth } from "@/lib/sync/gmail/orchestrator";
+import { recategorizeMonth } from "@/lib/sync/sync-engine";
 import { GmailAuthError, GmailApiError } from "@/lib/sync/gmail/client";
 import { ERROR_MESSAGES } from "@/lib/sync/types";
 import type { SyncErrorResponse } from "@/lib/sync/types";
@@ -54,7 +55,17 @@ export async function POST(request: NextRequest) {
     // 3. Run Gmail sync with ~20s budget
     const { results, next } = await runGmailMonth(month, sources, cursor);
 
-    // 4. Return results
+    // 4. Re-categorize & re-classify, but only once the month is fully paged:
+    //    this route is resumed by the client with `next`, and the mop-up pass has
+    //    nothing to mop up until the last page is in.
+    if (!next) {
+      const recat = await recategorizeMonth(user.id, month);
+      if (recat.updated > 0 || recat.classified > 0) {
+        console.log(`[sync/gmail] recategorized: ${recat.updated} updated, ${recat.classified} reclassified`);
+      }
+    }
+
+    // 5. Return results
     return NextResponse.json({ results, next });
   } catch (err) {
     // GmailAuthError → 401
