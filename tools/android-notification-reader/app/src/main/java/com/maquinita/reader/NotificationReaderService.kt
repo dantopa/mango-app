@@ -68,15 +68,20 @@ class NotificationReaderService : NotificationListenerService() {
             "com.android.mms",
         )
 
+        // Nexo and other foreign services write in English, so both languages are
+        // matched. A brand name alone counts as a signal, which is why the one-time
+        // code list below has to cover both languages too.
         val FINANCIAL_SIGNAL = Regex(
             "bancolombia|nequi|bbva|rappi|nexo|davivienda|" +
-                "compra|transacci[oó]n|d[eé]bito|cr[eé]dito|retiro|pago|transferencia|consumo",
+                "compra|transacci[oó]n|d[eé]bito|cr[eé]dito|retiro|pago|transferencia|consumo|" +
+                "purchase|transaction|debit|credit card|withdraw|payment|transfer|charged",
             RegexOption.IGNORE_CASE,
         )
 
         val ONE_TIME_CODE = Regex(
             "c[oó]digo|clave (?:temporal|din[aá]mica|segura)|token|\\botp\\b|" +
-                "verificaci[oó]n|no la compartas|no lo compartas|one[- ]time",
+                "verificaci[oó]n|no la compartas|no lo compartas|" +
+                "\\bcode\\b|verification|passcode|one[- ]time|do(?:n't| not) share",
             RegexOption.IGNORE_CASE,
         )
 
