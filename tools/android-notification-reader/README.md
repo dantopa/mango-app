@@ -35,6 +35,13 @@ servidor también lo valida, pero filtrar en el celular es lo que evita que text
 de notificaciones ajenas salga del dispositivo. Si agregás un paquete en
 `src/lib/push-ingest/package-whitelist.ts`, agregalo acá también.
 
+Las apps de SMS tienen además un filtro de contenido, solo en el celular: el
+paquete por sí solo no alcanza porque ahí entran los mensajes personales y los
+códigos de un solo uso. Un SMS se sube si menciona un banco o una operación
+(`FINANCIAL_SIGNAL`) y no parece un código (`ONE_TIME_CODE`). Sin esto, cada SMS
+que recibís sale del celu y además se come una llamada al LLM, porque `sms.ts`
+escala a la IA todo lo que ningún parser reconoce.
+
 ## Digital Asset Links
 
 La TWA solo esconde la barra de URL si el sitio y la app se reconocen mutuamente:

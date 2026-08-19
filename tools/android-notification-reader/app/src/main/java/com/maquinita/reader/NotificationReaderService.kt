@@ -32,6 +32,11 @@ class NotificationReaderService : NotificationListenerService() {
 
         if (title.isBlank() && text.isBlank()) return
 
+        // An SMS app carries everything: personal messages and one-time codes as
+        // well as bank alerts. The package alone is not a good enough filter, so
+        // its content has to earn the upload.
+        if (sbn.packageName in SMS_PACKAGES && !isFinancialSms(title, text)) return
+
         val payload = JSONObject()
             .put("packageName", sbn.packageName)
             .put("title", title)
@@ -45,7 +50,36 @@ class NotificationReaderService : NotificationListenerService() {
         UploadWorker.enqueue(applicationContext)
     }
 
+    /**
+     * The sender is as good a signal as the body — bank alerts arrive from a short
+     * code or a brand name — so both are matched. A one-time code is dropped even
+     * when it names the bank: it never describes an expense, and it is the most
+     * sensitive text on the phone.
+     */
+    private fun isFinancialSms(title: String, text: String): Boolean {
+        val message = "$title $text"
+        return FINANCIAL_SIGNAL.containsMatchIn(message) && !ONE_TIME_CODE.containsMatchIn(message)
+    }
+
     private companion object {
+        val SMS_PACKAGES = setOf(
+            "com.google.android.apps.messaging",
+            "com.samsung.android.messaging",
+            "com.android.mms",
+        )
+
+        val FINANCIAL_SIGNAL = Regex(
+            "bancolombia|nequi|bbva|rappi|nexo|davivienda|" +
+                "compra|transacci[oó]n|d[eé]bito|cr[eé]dito|retiro|pago|transferencia|consumo",
+            RegexOption.IGNORE_CASE,
+        )
+
+        val ONE_TIME_CODE = Regex(
+            "c[oó]digo|clave (?:temporal|din[aá]mica|segura)|token|\\botp\\b|" +
+                "verificaci[oó]n|no la compartas|no lo compartas|one[- ]time",
+            RegexOption.IGNORE_CASE,
+        )
+
         val WHITELIST = setOf(
             // Banking apps
             "com.todo1.mobile",                     // Bancolombia
