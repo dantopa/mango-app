@@ -9,19 +9,73 @@
     -->
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="false"
         android:theme="@android:style/Theme.DeviceDefault.Light">
 
+        <!--
+          Digital Asset Links, app half. The site half is served from
+          /.well-known/assetlinks.json; Chrome checks both match before it hides
+          the URL bar. Without the pair, the TWA still works but looks like a
+          browser tab.
+        -->
+        <meta-data
+            android:name="asset_statements"
+            android:resource="@string/asset_statements" />
+
+        <!--
+          The launcher IS the PWA: Chrome renders it full screen, sharing the
+          browser's session, service worker and web push. Updating the site
+          updates the app, so there is nothing to reinstall.
+        -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
             android:exported="true"
-            android:label="@string/app_name">
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+
+            <meta-data
+                android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                android:value="@string/twa_url" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+                android:resource="@color/theme_background" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
+                android:resource="@color/theme_background" />
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Opening a link to the app's own domain opens the app, not Chrome. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="@string/twa_host"
+                    android:scheme="https" />
+            </intent-filter>
+
+            <!-- Long-press the icon to reach the reader config. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!--
+          Reader config. No longer the launcher, and not exported: it is reached
+          from the app shortcut, so nothing outside the app can open the screen
+          that shows the endpoint and the token.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:label="@string/reader_config" />
 
         <!--
           Bound by the system, so it must be exported; the BIND permission is what

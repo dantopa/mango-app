@@ -1,6 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Maquinita Reader</string>
+    <string name="app_name">Maquinita</string>
+    <string name="reader_config">Lector de notificaciones</string>
+
+    <!--
+      The site the TWA opens. Changing the domain means changing twa_host, the
+      site in asset_statements, and public/.well-known/assetlinks.json together.
+    -->
+    <string name="twa_url" translatable="false">https://mango-app-phi.vercel.app</string>
+    <string name="twa_host" translatable="false">mango-app-phi.vercel.app</string>
+
+    <!-- App half of the Digital Asset Links pair. Must match the served file. -->
+    <string name="asset_statements" translatable="false">
+        [{
+          \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+          \"target\": {
+            \"namespace\": \"web\",
+            \"site\": \"https://mango-app-phi.vercel.app\"
+          }
+        }]
+    </string>
+
     <string name="endpoint_label">URL del endpoint</string>
     <string name="endpoint_hint">https://tu-app.vercel.app/api/push-ingest</string>
     <string name="token_label">Token (PUSH_INGEST_SECRET)</string>

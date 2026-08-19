@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The reader config is not the launcher any more, so this is how it stays
+  reachable: long-press the app icon. targetClass is the non-exported activity,
+  which is allowed because the shortcut belongs to the same app.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:shortcutId="reader-config"
+        android:shortcutLongLabel="@string/reader_config"
+        android:shortcutShortLabel="@string/reader_config">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="com.maquinita.reader.MainActivity"
+            android:targetPackage="com.maquinita.reader" />
+    </shortcut>
+</shortcuts>

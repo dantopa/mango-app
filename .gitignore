@@ -48,6 +48,10 @@ supabase/.temp/
 .vercel
 
 # android reader (gradle build output + local SDK path)
+# Signing config: the keystore itself lives in ~/.android/, outside the repo, so
+# only the pointer file could ever leak. It holds the keystore password.
+tools/android-notification-reader/keystore.properties
+tools/android-notification-reader/*.keystore
 tools/android-notification-reader/.gradle/
 tools/android-notification-reader/build/
 tools/android-notification-reader/app/build/

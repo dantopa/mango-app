@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.maquinita.reader",
+      "sha256_cert_fingerprints": [
+        "09:D2:22:C0:7E:42:E5:5E:60:6B:94:15:9B:A6:62:2C:04:42:0C:66:1A:0A:9F:3C:12:2B:58:DE:2A:7E:8B:47",
+        "2A:36:63:5D:8E:AD:6F:4D:06:D2:D0:7F:17:F1:0F:4B:37:AF:F9:01:EE:C4:86:89:16:5C:6A:C4:72:48:62:4A"
+      ]
+    }
+  }
+]

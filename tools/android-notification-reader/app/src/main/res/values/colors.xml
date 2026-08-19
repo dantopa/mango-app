@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same value as theme_color/background_color in src/app/manifest.ts, so the
+         system bars match the PWA instead of flashing white on launch. -->
+    <color name="theme_background">#0a0a0b</color>
+</resources>
