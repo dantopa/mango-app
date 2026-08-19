@@ -7,6 +7,9 @@ import { parseCopAmount, normalizeDate } from "@/lib/sync/gmail/money";
 // `\s+` por el mismo motivo que en sync/gmail: el texto largo de la notificación
 // puede venir cortado, y un ingreso mal clasificado se vuelve un gasto inventado.
 const RE_ENTRADA = /recibiste\s+(una\s+transferencia|un\s+pago)/i;
+/** Remitente del ingreso: "recibiste una transferencia de X por $N". */
+const RE_ENTRADA_ORIGEN =
+  /recibiste\s+(?:una\s+transferencia|un\s+pago)\s+de\s+([\s\S]+?)\s+por\s+\$/i;
 const RE_PAGO_QR = /pagaste .* por codigo QR/i;
 const RE_PAGO_SERVICIO = /pagaste \$[\d.,]+ a/i;
 const RE_COMPRA = /compraste \$[\d.,]+ en/i;
@@ -71,16 +74,10 @@ function extractDestinationFromTransfer(text: string): string | null {
 
 /**
  * Bancolombia push notification parser.
- * Handles: COMPRA, PAGO_QR, PAGO_SERVICIO, TRANSFERENCIA.
- * Ignores: ENTRADA (not an expense).
+ * Handles: ENTRADA (income), COMPRA, PAGO_QR, PAGO_SERVICIO, TRANSFERENCIA.
  */
 export const bancolombiaParser: ParserFn = (payload: PushPayload): ParseResult => {
   const text = payload.text;
-
-  // 1. Classification — ordered most specific first
-  if (RE_ENTRADA.test(text)) {
-    return { kind: "ignore", reason: "incoming transfer, not an expense" };
-  }
 
   const amount = extractAmount(text);
   if (amount === null || amount <= 0) return { kind: "unknown" };
@@ -97,8 +94,13 @@ export const bancolombiaParser: ParserFn = (payload: PushPayload): ParseResult =
   }
 
   let merchant: string | null = null;
+  let isIncome = false;
 
-  if (RE_PAGO_QR.test(text)) {
+  if (RE_ENTRADA.test(text)) {
+    isIncome = true;
+    const entradaMatch = text.match(RE_ENTRADA_ORIGEN);
+    merchant = entradaMatch ? entradaMatch[1].trim() : null;
+  } else if (RE_PAGO_QR.test(text)) {
     // QR payment — merchant is between "pagaste" and "por codigo QR"
     const qrMatch = text.match(/pagaste \$[\d.,]+ en (.+?) por codigo QR/i);
     merchant = qrMatch ? qrMatch[1].trim() : null;
@@ -116,13 +118,16 @@ export const bancolombiaParser: ParserFn = (payload: PushPayload): ParseResult =
   return {
     kind: "transaction",
     tx: {
-      amount_native: amount,
+      // Negativo para la plata que entra: convención de la tabla, y lo que la
+      // mantiene fuera de cualquier total de gasto.
+      amount_native: isIncome ? -amount : amount,
       native_currency: "COP",
       merchant,
       tx_date: txDate,
       description_raw: text,
       account_name: ACCOUNT_NAME,
       card_last4: cardDigits,
+      ...(isIncome && { is_income: true }),
     },
   };
 };

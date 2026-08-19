@@ -98,14 +98,16 @@ describe("Bancolombia Gmail parser", () => {
       expect(result[0].merchant).toBe("PALOMMA SAS");
       expect(result[0].tx_date).toBe("2026-06-01");
     });
-  });
 
-  describe("parse — discards", () => {
-    it("INGRESO: returns [] for incoming transfers", () => {
+    it("INGRESO: negative amount and sender as merchant", () => {
       const email = loadFixture("bancolombia-ingreso.txt");
       const result = bancolombiaDef.parse(email);
 
-      expect(result).toEqual([]);
+      expect(result).toHaveLength(1);
+      expect(result[0].amount_native).toBe(-970000);
+      expect(result[0].is_income).toBe(true);
+      expect(result[0].merchant).toBe("SUPRA NEGOCIOS SAS");
+      expect(result[0].tx_date).toBe("2026-06-05");
     });
 
     // El text/plain real viene cortado a 72 columnas y bodyText lo prefiere sobre
@@ -113,11 +115,25 @@ describe("Bancolombia Gmail parser", () => {
     // no se detectaba ni un ingreso, y todos caían al camino de la IA.
     it("INGRESO: también cuando el text/plain corta la frase en dos líneas", () => {
       const email = loadFixture("bancolombia-ingreso-wrapped.txt");
-
       expect(email.bodyText).toContain("recibiste una\ntransferencia");
-      expect(bancolombiaDef.parse(email)).toEqual([]);
+
+      const result = bancolombiaDef.parse(email);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].amount_native).toBe(-100000);
+      expect(result[0].is_income).toBe(true);
+      expect(result[0].merchant).toBe("SUPRA NEGOCIOS SAS");
+      expect(result[0].tx_date).toBe("2026-08-15");
     });
 
+    it("GASTO: no marca is_income en una compra", () => {
+      const result = bancolombiaDef.parse(loadFixture("bancolombia-compra.txt"));
+
+      expect(result[0].is_income).toBeUndefined();
+    });
+  });
+
+  describe("parse — discards", () => {
     it("NO-TX: returns [] for non-transactional emails", () => {
       const email = loadFixture("bancolombia-no-tx.txt");
       const result = bancolombiaDef.parse(email);

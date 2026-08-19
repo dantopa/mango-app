@@ -10,9 +10,9 @@ import { bbvaArgentinaParser } from "./bbva-argentina";
  * content, because banks send SMS alerts as well as their own push.
  *
  * A transaction wins outright. Otherwise an explicit `ignore` from any parser
- * is preserved — if Bancolombia recognized the SMS as an incoming transfer,
- * that is a real answer and must not be downgraded to "unknown" and sent to
- * the LLM. Only a text nobody recognized escalates.
+ * is preserved — if a parser recognized the SMS as a declined purchase, that is
+ * a real answer and must not be downgraded to "unknown" and sent to the LLM.
+ * Only a text nobody recognized escalates.
  */
 const financialParsers: ParserFn[] = [
   bancolombiaParser,

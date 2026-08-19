@@ -303,8 +303,12 @@ export async function executePipeline(
   }
 
   // 8. Classify (transfer vs expense)
-  const classification = await classifyTransaction(resolved, OWNER_USER_ID);
-  if (classification.type === "transfer") {
+  // Un ingreso no pasa por acá: no es un gasto ni un pago, y una regla de
+  // transferencia que matchee al remitente lo descartaría en vez de registrarlo.
+  const classification = resolved.is_income
+    ? null
+    : await classifyTransaction(resolved, OWNER_USER_ID);
+  if (classification?.type === "transfer") {
     await patchIngestLog(supabase, dedupKey, { status: "transfer" });
     return { status: "registered", transaction_id: "transfer-skipped" };
   }
@@ -394,22 +398,27 @@ export async function executePipeline(
   // action === "insert" → continue pipeline normally
 
   // 11. Categorize (deterministic first, AI fallback)
-  const catResult = await categorize(resolved.merchant, OWNER_USER_ID, resolved.description_raw);
+  // Las categorías son de gasto: un ingreso queda sin categoría, y eso no es una
+  // revisión pendiente ni vale una llamada de IA.
   let categoryId: string | null = null;
-  let catMatched = false;
+  let catMatched = resolved.is_income === true;
 
-  if (catResult.matched) {
-    categoryId = catResult.category_id;
-    catMatched = true;
-  } else {
-    const aiResult = await categorizeWithAi(resolved.merchant, resolved.description_raw, OWNER_USER_ID);
-    if (aiResult.matched) {
-      categoryId = aiResult.category_id;
+  if (!catMatched) {
+    const catResult = await categorize(resolved.merchant, OWNER_USER_ID, resolved.description_raw);
+
+    if (catResult.matched) {
+      categoryId = catResult.category_id;
       catMatched = true;
+    } else {
+      const aiResult = await categorizeWithAi(resolved.merchant, resolved.description_raw, OWNER_USER_ID);
+      if (aiResult.matched) {
+        categoryId = aiResult.category_id;
+        catMatched = true;
+      }
     }
   }
 
-  if (!catMatched || classification.type === "unknown") needsReview = true;
+  if (!catMatched || classification?.type === "unknown") needsReview = true;
 
   // 12. Insert transaction
   const { data: txData, error: txError } = await supabase
@@ -425,7 +434,9 @@ export async function executePipeline(
       fx_rate_to_usd: fxResult.rate,
       amount_usd: amountUsd,
       category_id: categoryId,
-      is_payment: false,
+      // Un negativo que no es ingreso es una devolución: cancela un gasto y por
+      // eso queda como pago, igual que en el sync.
+      is_payment: !resolved.is_income && resolved.amount_native < 0,
       needs_review: needsReview,
       source: "push_ingest",
       country: "CO", // Default for now
@@ -520,20 +531,27 @@ export async function executePipeline(
 
   // 15. Send web push notification
   try {
+    // El monto de un ingreso se guarda negativo, pero mostrarlo así en el aviso
+    // sólo confunde: el signo ya lo dice el título.
+    const shownAmount = resolved.is_income ? Math.abs(resolved.amount_native) : resolved.amount_native;
+    const shownUsd = resolved.is_income ? Math.abs(amountUsd) : amountUsd;
     const amountFormatted = resolved.native_currency === "USD"
-      ? `US$${resolved.amount_native.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
-      : `${resolved.native_currency} ${resolved.amount_native.toLocaleString("es-CO")} (~US$${amountUsd.toFixed(2)})`;
+      ? `US$${shownAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+      : `${resolved.native_currency} ${shownAmount.toLocaleString("es-CO")} (~US$${shownUsd.toFixed(2)})`;
 
+    // El semáforo es de presupuesto: en un ingreso no dice nada.
     const semaphoreEmoji = semaphoreResult
       ? { verde: "🟢", amarillo: "🟡", rojo: "🔴" }[semaphoreResult.state]
       : "";
-    const semaphoreText = semaphoreResult
+    const semaphoreText = semaphoreResult && !resolved.is_income
       ? ` ${semaphoreEmoji} ${Math.round(semaphoreResult.pct * 100)}% del presupuesto`
       : "";
 
     await sendPushNotification(OWNER_USER_ID, {
-      title: `💸 ${amountFormatted}`,
-      body: `${resolved.merchant ?? "Gasto"} registrado.${semaphoreText}`,
+      title: `${resolved.is_income ? "💰" : "💸"} ${amountFormatted}`,
+      body: resolved.is_income
+        ? `Ingreso de ${resolved.merchant ?? "origen desconocido"}.`
+        : `${resolved.merchant ?? "Gasto"} registrado.${semaphoreText}`,
       tag: `tx-${txData.id}`,
       data: { url: "/gastos" },
     });

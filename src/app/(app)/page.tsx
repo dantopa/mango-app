@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Receipt, TrendingUp, CalendarDays } from "lucide-react";
+import { ArrowDownLeft, Receipt, TrendingUp, CalendarDays } from "lucide-react";
 
 import {
   useAccounts,
@@ -14,12 +14,14 @@ import {
   daysInMonthKey,
   filterByMonth,
   goalProgress,
+  isIncome,
   monthsPresent,
   netWorthByDate,
   netWorthComposition,
   netWorthSummary,
   recentMonthlyPace,
   spendPatterns,
+  totalIncome,
   totalSpend,
 } from "@/lib/analytics";
 import { formatMonth, formatUsd } from "@/lib/format";
@@ -65,11 +67,24 @@ export default function DashboardPage() {
     const currentMonth = months[0] ?? null;
     const monthTxns = currentMonth ? filterByMonth(txns.data, currentMonth) : [];
     const monthSpend = totalSpend(monthTxns);
+    const monthIncome = totalIncome(monthTxns);
+    const incomeCount = monthTxns.filter(isIncome).length;
     const patterns = currentMonth
       ? spendPatterns(monthTxns, daysInMonthKey(currentMonth))
       : null;
 
-    return { series, summary, composition, pace, progress, currentMonth, monthSpend, patterns };
+    return {
+      series,
+      summary,
+      composition,
+      pace,
+      progress,
+      currentMonth,
+      monthSpend,
+      monthIncome,
+      incomeCount,
+      patterns,
+    };
   }, [snapshots.data, accounts.data, goals.data, txns.data]);
 
   if (isLoading) return <LoadingState />;
@@ -86,7 +101,17 @@ export default function DashboardPage() {
     );
   }
 
-  const { summary, series, composition, progress, currentMonth, monthSpend, patterns } = view;
+  const {
+    summary,
+    series,
+    composition,
+    progress,
+    currentMonth,
+    monthSpend,
+    monthIncome,
+    incomeCount,
+    patterns,
+  } = view;
 
   return (
     <>
@@ -136,13 +161,19 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick stats */}
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <SemaphoreGauge />
         <StatCard
           label={`Gasto ${currentMonth ? formatMonth(currentMonth + "-01") : "del mes"}`}
           value={formatUsd(monthSpend)}
           hint={patterns ? `${patterns.expenseCount} consumos` : undefined}
           icon={<Receipt className="size-4" />}
+        />
+        <StatCard
+          label={`Ingresos ${currentMonth ? formatMonth(currentMonth + "-01") : "del mes"}`}
+          value={formatUsd(monthIncome)}
+          hint={`${incomeCount} ${incomeCount === 1 ? "transferencia recibida" : "transferencias recibidas"}`}
+          icon={<ArrowDownLeft className="size-4" />}
         />
         <StatCard
           label="Ritmo de ahorro"

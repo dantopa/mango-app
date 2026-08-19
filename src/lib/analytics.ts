@@ -183,6 +183,19 @@ export function isExpense(t: TransactionWithRelations): boolean {
   return !t.is_payment && t.amount_usd > 0;
 }
 
+/**
+ * Money coming in: a negative amount that is not cancelling a spend. Refunds and
+ * card payments are also negative but carry `is_payment`, so they stay out.
+ */
+export function isIncome(t: TransactionWithRelations): boolean {
+  return !t.is_payment && t.amount_usd < 0;
+}
+
+/** Total income, as a positive number. */
+export function totalIncome(txns: TransactionWithRelations[]): number {
+  return txns.reduce((sum, t) => (isIncome(t) ? sum - t.amount_usd : sum), 0);
+}
+
 export type CategorySpend = {
   categoryId: string | null;
   name: string;

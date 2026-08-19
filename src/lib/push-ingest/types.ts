@@ -24,6 +24,12 @@ export type ParsedTransaction = {
   description_raw: string;
   account_name: string;
   card_last4?: string | null; // últimos 4 dígitos de la tarjeta — clave de dedup
+  /**
+   * Plata que entra (transferencia o pago recibido), con `amount_native` negativo.
+   * Explícito y no derivado del signo: una devolución también es negativa, pero
+   * cancela un gasto (`is_payment = true`) en vez de ser un ingreso.
+   */
+  is_income?: boolean;
 };
 
 /**

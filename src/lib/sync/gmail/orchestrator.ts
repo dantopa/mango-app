@@ -225,8 +225,9 @@ export async function runGmailSource(
         // 3c. The hand-written parser found nothing. Try the learned patterns,
         //     and only if those miss too, spend an AI call to learn this format.
         if (candidates.length === 0) {
-          // Ingresos are settled here: money coming in is never an expense, and
-          // that is cheap to decide without a model.
+          // Fallback for an ingreso the source parser could not turn into a
+          // candidate (no date, unseen wording). Better logged as what it is than
+          // handed to a model that could read it as an expense.
           if (RE_INGRESO.test(email.bodyText)) {
             await logProcessedEmail({
               messageId,

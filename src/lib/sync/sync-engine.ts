@@ -116,40 +116,51 @@ export async function processCandidates(
       }
 
       // 3. Classify (transfer detection)
-      const classification = await classifyTransaction(
-        {
-          merchant: candidate.merchant,
-          description_raw: candidate.description_raw,
-        },
-        userId
-      );
+      // Un ingreso no pasa por acá: no es un gasto ni un pago, y una regla de
+      // transferencia que matchee al remitente lo volvería indistinguible de un
+      // reembolso. Un negativo que no es ingreso sí es un pago/reembolso.
+      const classification = candidate.is_income
+        ? null
+        : await classifyTransaction(
+            {
+              merchant: candidate.merchant,
+              description_raw: candidate.description_raw,
+            },
+            userId
+          );
 
-      const isPayment = classification.type === "transfer";
+      const isPayment = candidate.is_income
+        ? false
+        : classification?.type === "transfer" || candidate.amount_native < 0;
 
       // 4. Categorize (deterministic first, AI fallback)
-      const categorizationResult = await categorize(
-        candidate.merchant,
-        userId,
-        candidate.description_raw
-      );
-
+      // Las categorías son de gasto, así que un ingreso queda sin categoría — y
+      // eso no es una revisión pendiente ni vale una llamada de IA.
       let categoryId: string | null = null;
-      let categorizationMatched = false;
+      let categorizationMatched = candidate.is_income === true;
 
-      if (categorizationResult.matched) {
-        categoryId = categorizationResult.category_id;
-        categorizationMatched = true;
-      } else if (aiCallCount < MAX_AI_CALLS_PER_BATCH) {
-        // AI fallback — also auto-creates a rule for next time
-        aiCallCount++;
-        const aiResult = await categorizeWithAi(
+      if (!categorizationMatched) {
+        const categorizationResult = await categorize(
           candidate.merchant,
-          candidate.description_raw,
-          userId
+          userId,
+          candidate.description_raw
         );
-        if (aiResult.matched) {
-          categoryId = aiResult.category_id;
+
+        if (categorizationResult.matched) {
+          categoryId = categorizationResult.category_id;
           categorizationMatched = true;
+        } else if (aiCallCount < MAX_AI_CALLS_PER_BATCH) {
+          // AI fallback — also auto-creates a rule for next time
+          aiCallCount++;
+          const aiResult = await categorizeWithAi(
+            candidate.merchant,
+            candidate.description_raw,
+            userId
+          );
+          if (aiResult.matched) {
+            categoryId = aiResult.category_id;
+            categorizationMatched = true;
+          }
         }
       }
 

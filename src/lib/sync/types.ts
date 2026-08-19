@@ -12,6 +12,14 @@ export interface CandidateTransaction {
   expense_type?: "fixed" | "variable"; // defaults to "variable" if not set
   card_last4?: string | null; // últimos 4 dígitos de la tarjeta (*5685, ••5685) — clave fuerte de dedup
   country?: string; // ISO 3166-1 alpha-2 (defaults to "CO" if not set)
+  /**
+   * Plata que entra (transferencia o pago recibido), con `amount_native` negativo.
+   *
+   * Explícito y no derivado del signo porque un reembolso también es negativo y
+   * no es lo mismo: el reembolso se guarda con `is_payment = true` (devuelve un
+   * gasto), el ingreso con `is_payment = false` para poder mostrarlo aparte.
+   */
+  is_income?: boolean;
 }
 
 export type SyncSource =

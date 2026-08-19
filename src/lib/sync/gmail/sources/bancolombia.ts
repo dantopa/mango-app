@@ -20,6 +20,9 @@ const ACCOUNT_NAME = "Bancolombia Ahorros";
  * ("recibiste una\ntransferencia"), que es lo que pasaba con todos los ingresos.
  */
 const RE_INGRESO = /recibiste\s+(una\s+transferencia|un\s+pago)/i;
+/** Remitente del ingreso: "recibiste una transferencia de X por $N". */
+const RE_INGRESO_ORIGEN =
+  /recibiste\s+(?:una\s+transferencia|un\s+pago)\s+de\s+([\s\S]+?)\s+por\s+\$/i;
 const RE_COMPRA = /compraste\s+\$[\d.,]+\s+en/i;
 const RE_PAGO_SERVICIO = /pagaste\s+\$[\d.,]+\s+a[\s\S]+?desde\s+tu\s+producto/i;
 const RE_QR = /pagaste[\s\S]*?por\s+codigo\s+QR/i;
@@ -57,15 +60,10 @@ function buildQuery(month: string): string {
 
 /**
  * Parse a Bancolombia email body into candidate transactions.
- * Returns [] for non-transactional emails, ingresos, or when data extraction fails.
+ * Returns [] for non-transactional emails or when data extraction fails.
  */
 function parse(email: ParsedEmail): CandidateTransaction[] {
   const text = email.bodyText;
-
-  // Skip ingresos (income, not an expense)
-  if (RE_INGRESO.test(text)) {
-    return [];
-  }
 
   // Extract amount
   const amountMatch = text.match(RE_AMOUNT);
@@ -82,8 +80,14 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
 
   // Determine merchant by variant
   let merchant: string | null = null;
+  let isIncome = false;
 
-  if (RE_COMPRA.test(text)) {
+  if (RE_INGRESO.test(text)) {
+    // "recibiste una transferencia de REMITENTE por $X en tu cuenta *NNNN el DD/MM/YY"
+    isIncome = true;
+    const m = text.match(RE_INGRESO_ORIGEN);
+    merchant = m ? m[1].replace(/\s+/g, " ").trim() : null;
+  } else if (RE_COMPRA.test(text)) {
     // "Compraste $X en MERCHANT con tu T.Deb/T.Cred *NNNN, el DD/MM/YYYY"
     const m = text.match(/compraste\s+\$[\d.,]+\s+en\s+([\s\S]+?)\s+con\s+tu/i);
     merchant = m ? m[1].replace(/\s+/g, " ").trim() : null;
@@ -130,7 +134,9 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
 
   return [
     {
-      amount_native: amount,
+      // Negativo para la plata que entra: es la convención de la tabla y lo que
+      // mantiene el ingreso fuera de cualquier total de gasto.
+      amount_native: isIncome ? -amount : amount,
       native_currency: "COP",
       merchant,
       tx_date: txDate,
@@ -138,6 +144,7 @@ function parse(email: ParsedEmail): CandidateTransaction[] {
       account_name: ACCOUNT_NAME,
       source: "sync_gmail_bancolombia",
       card_last4,
+      ...(isIncome && { is_income: true }),
     },
   ];
 }
