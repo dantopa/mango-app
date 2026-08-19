@@ -90,7 +90,8 @@ class SensorService : Service() {
         )
 
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(getColor(R.color.brand_green))
             .setContentTitle(getString(R.string.sensor_notification_title))
             .setContentText(status)
             .setContentIntent(tap)

@@ -113,6 +113,40 @@
             android:label="@string/reader_config" />
 
         <!--
+          Notification delegation. Without it Chrome posts the web push itself, so
+          an expense alert arrives branded as Chrome — which is what it looks like:
+          a browser tab, not the app. With it Chrome hands the notification to this
+          service and the system attributes it to Maquinita, with our own icon.
+
+          Exported because the browser has to bind it. That is safe: the base class
+          verifies the caller against the token TwaLauncher stored for the browser
+          that launched us, and Digital Asset Links is what makes that token
+          trustworthy — so only our own verified browser gets through.
+        -->
+        <service
+            android:name="com.google.androidbrowserhelper.trusted.DelegationService"
+            android:exported="true">
+            <meta-data
+                android:name="android.support.customtabs.trusted.SMALL_ICON"
+                android:resource="@drawable/ic_notification" />
+            <intent-filter>
+                <action android:name="android.support.customtabs.trusted.TRUSTED_WEB_ACTIVITY_SERVICE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
+        <!--
+          Started through a PendingIntent the delegation service hands to the
+          browser, so that a permission prompt triggered by the page asks for *this
+          app's* POST_NOTIFICATIONS. Translucent and not exported: it has no UI of
+          its own beyond the system dialog, and only our own PendingIntent starts it.
+        -->
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.NotificationPermissionRequestActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!--
           Only exists to hand the splash image to Chrome. Not exported and scoped
           to one directory (@xml/filepaths), so it is not a way into this app's
           files: the URI is granted per launch, to the browser, for one PNG.

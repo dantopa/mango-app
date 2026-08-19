@@ -3,4 +3,7 @@
     <!-- Same value as theme_color/background_color in src/app/manifest.ts, so the
          system bars match the PWA instead of flashing white on launch. -->
     <color name="theme_background">#0a0a0b</color>
+
+    <!-- The logo's green. Tints the notification icon and its accents in the shade. -->
+    <color name="brand_green">#13c362</color>
 </resources>
