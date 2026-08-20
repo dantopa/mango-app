@@ -197,6 +197,17 @@ export async function executePipeline(
   const parseResult = await runParsers(payload, OWNER_USER_ID, loadAccounts);
 
   if (parseResult.kind === "unknown") {
+    // Logged even though nothing could be extracted: this is the only trace a
+    // dropped notification leaves outside push_raw_log. Without it, a real
+    // expense vanishes with zero visibility — which is exactly what happened
+    // with the Nexo COP amounts before this row existed.
+    const claim = await claimIngest(supabase, {
+      dedup_key: dedupKey,
+      user_id: OWNER_USER_ID,
+      package_name: payload.packageName,
+      status: "no_parser",
+    }, force);
+    if (claim === "already_claimed") return { status: "duplicate", dedup_key: dedupKey };
     return { status: "no_parser", package_name: payload.packageName };
   }
 

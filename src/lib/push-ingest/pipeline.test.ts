@@ -244,6 +244,22 @@ describe("executePipeline", () => {
       expect(llmFallbackParser).not.toHaveBeenCalled();
     });
 
+    it("logs a no_parser row so a dropped notification isn't invisible", async () => {
+      // Regression: an unrecognized notification used to leave zero trace —
+      // not even a push_ingest_log row — so a real expense could silently
+      // vanish with nothing to investigate later.
+      vi.mocked(getParser).mockReturnValue(undefined);
+
+      const result = await executePipeline(basePayload, "full_pipeline");
+
+      expect(result.status).toBe("no_parser");
+      expect(claimedIngest()).toMatchObject({
+        dedup_key: "dedup-key-123",
+        package_name: basePayload.packageName,
+        status: "no_parser",
+      });
+    });
+
     it("falls back to the template parser when the deterministic parser does not recognize the text", async () => {
       vi.mocked(getParser).mockReturnValue(() => ({ kind: "unknown" }));
       vi.mocked(tryTemplateParser).mockResolvedValue(transactionOf(parsedTx));
