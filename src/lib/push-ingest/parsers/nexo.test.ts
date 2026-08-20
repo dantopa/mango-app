@@ -52,6 +52,34 @@ describe("nexoParser", () => {
     });
   });
 
+  describe("parses crypto cashback notifications", () => {
+    // Regression: "Cashback en cripto: X NEXO" contains its own "en", and the
+    // old ".* en" merchant anchor greedily matched that one instead of the
+    // "en" before the merchant name, capturing "cripto: X NEXO" as the
+    // merchant. This is also the format Nexo actually sends for COP charges.
+    it("parses 'Pago de' with a crypto cashback suffix", () => {
+      const tx = expectTransaction(
+        nexoParser({
+          ...basePayload,
+          text: "Pago de 19900.00 COP (€5.55) en UBER *ONE MEMBERSHIP U. Cashback en cripto: 0.13442718 NEXO.",
+        }),
+      );
+      expect(tx.amount_native).toBe(19900);
+      expect(tx.native_currency).toBe("COP");
+      expect(tx.merchant).toBe("UBER *ONE MEMBERSHIP U");
+    });
+
+    it("parses a merchant name that itself contains a period", () => {
+      const tx = expectTransaction(
+        nexoParser({
+          ...basePayload,
+          text: "Pago de 27.51 USD (€24.08) en UBER *TRIP HELP.UBER.C. Cashback en cripto: 0.54428121 NEXO.",
+        }),
+      );
+      expect(tx.merchant).toBe("UBER *TRIP HELP.UBER.C");
+    });
+  });
+
   describe("parses English payment notifications", () => {
     it("parses 'Payment of' variant", () => {
       const tx = expectTransaction(

@@ -9,8 +9,12 @@ import { isKnownCurrency, parseAmount } from "../money";
  * Ignores: promos, price alerts and balance updates.
  */
 
-const RE_PAGO = /pago de ([\d.,]+) (\w+) .* en (.+?)\.?\s*(?:Cashback|$)/i;
-const RE_PAYMENT_EN = /payment of ([\d.,]+) (\w+) .* at (.+?)\.?\s*(?:Cashback|$)/i;
+// Anchored to the "(€X.XX)" EUR-equivalent that always precedes "en"/"at":
+// a bare ".*" here greedily matches through to the LAST "en" in the string,
+// which crypto-cashback notifications ("... en MERCHANT. Cashback en
+// cripto: ...") also contain, corrupting the merchant into the cashback text.
+const RE_PAGO = /pago de ([\d.,]+) (\w+) \([^)]*\) en (.+?)\.?\s*(?:Cashback|$)/i;
+const RE_PAYMENT_EN = /payment of ([\d.,]+) (\w+) \([^)]*\) at (.+?)\.?\s*(?:Cashback|$)/i;
 
 const RE_PROMO = /opera más|usa futures|multiplica|saldo de trading|precio de|descubre|aprovecha/i;
 

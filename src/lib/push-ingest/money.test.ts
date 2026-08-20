@@ -35,6 +35,16 @@ describe("parseAmount", () => {
     expect(parseAmount("1.50", "USD")).toBe(1.5);
   });
 
+  it("drops a redundant zero-cents suffix on a zero-decimal currency", () => {
+    // Regression: Nexo Card notifications write COP amounts as "19900.00",
+    // which isn't a valid 3-digit thousands group, so it was rejected outright
+    // and the whole notification silently dropped instead of registering.
+    expect(parseAmount("19900.00", "COP")).toBe(19900);
+    expect(parseAmount("14956.00", "COP")).toBe(14956);
+    expect(parseAmount("124,414,00", "COP")).toBe(null); // unrelated shape, still rejected
+    expect(parseAmount("1.50", "COP")).toBe(null); // non-zero trailing stays ambiguous
+  });
+
   it("keeps the sign of a refund", () => {
     expect(parseAmount("-COP124,414.00")).toBe(-124414);
     expect(parseAmount("-14,962.00")).toBe(-14962);

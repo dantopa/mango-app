@@ -65,6 +65,24 @@ export function parseAmount(raw: string, currency?: string | null): number | nul
     const parts = cleaned.split(sep);
     const trailing = parts[parts.length - 1];
 
+    // A zero-decimal currency written with a trailing ".00"/",00" (Nexo Card
+    // does this for COP) has no cents to disambiguate — drop the redundant
+    // zero suffix instead of forcing it through thousands-grouping, which
+    // rejects it outright (only 3-digit groups qualify) and silently drops
+    // the whole notification.
+    if (
+      parts.length === 2 &&
+      (trailing.length === 1 || trailing.length === 2) &&
+      /^0+$/.test(trailing) &&
+      currency &&
+      ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase())
+    ) {
+      normalized = parts[0];
+      const value = Number(normalized);
+      if (!Number.isFinite(value)) return null;
+      return negative ? -value : value;
+    }
+
     const groupsThousands =
       parts.length > 2 ||
       trailing.length === 3 ||
