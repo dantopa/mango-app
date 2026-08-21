@@ -116,6 +116,26 @@ describe("googleWalletParser — formats", () => {
     expect(tx.native_currency).toBe("COP");
   });
 
+  it("stores the 'suffix currency' refund phrasing as a negative amount", () => {
+    // Regression: this exact notification escalated to the AI (RE_CHARGE
+    // expects "<amount> en <card> ••1234", but here the card comes first and
+    // the amount/currency come after "importe:"). The AI then classified it
+    // as is_transaction=false — a reimbursement "is not an expense" — so the
+    // refund was silently dropped and the original charge stayed unreversed.
+    const tx = expectTransaction(
+      googleWalletParser({
+        ...basePayload,
+        title: "UBR* PENDING.UBER.COM",
+        text: "Se ha reembolsado en la tarjeta Nexo Mastercard ••4186 el siguiente importe: -11.475 COP",
+      }),
+    );
+    expect(tx.amount_native).toBe(-11475);
+    expect(tx.native_currency).toBe("COP");
+    expect(tx.card_last4).toBe("4186");
+    expect(tx.account_name).toBe("Nexo Mastercard");
+    expect(tx.merchant).toBe("UBR* PENDING.UBER.COM");
+  });
+
   it("ignores a declined payment instead of registering it", () => {
     const result = googleWalletParser({
       ...basePayload,
