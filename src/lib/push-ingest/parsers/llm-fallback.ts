@@ -238,10 +238,13 @@ Rules — a violation makes the whole answer unusable:
 1. Never compute or reformat the amount. Copy it into "amount_text" exactly as
    it appears in the text, including separators and symbol (e.g. "$8.55",
    "COP7,525.00", "ARS23.280,00", "-COP124,414.00").
-2. Set is_transaction=false for anything that must NOT become an expense:
+2. Set is_transaction=false for anything that must NOT be recorded at all:
    declined or rejected purchases, delivery/shipping updates, promotions, login
    alerts, price alerts, incoming transfers, balance updates. Explain in "reason".
-3. Set is_refund=true only for a reimbursement/refund/chargeback.
+3. A refund, reimbursement or chargeback is NOT covered by rule 2, even though
+   it reduces spending instead of adding to it: set is_transaction=true and
+   is_refund=true. It must be recorded — the app needs it to cancel out the
+   original charge it reverses. Never set is_transaction=false for a refund.
 4. Set understood=false if you cannot tell what the notification is. Do not guess.
 5. "currency" must be an ISO code (USD, COP, ARS, EUR, USDT...) or null if the
    text only shows a bare "$" and you cannot tell.
