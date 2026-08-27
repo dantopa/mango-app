@@ -5,9 +5,12 @@ export const maxDuration = 300;
 
 import { validateBearer } from "@/lib/push-ingest/auth";
 import { runGmailMonth } from "@/lib/sync/gmail/orchestrator";
+import { recategorizeMonth } from "@/lib/sync/sync-engine";
 import { GmailAuthError } from "@/lib/sync/gmail/client";
 import type { GmailSyncCursor } from "@/lib/sync/gmail/types";
 import type { SyncSourceResult } from "@/lib/sync/types";
+
+const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * GET /api/sync/cron
@@ -55,6 +58,21 @@ export async function GET(request: NextRequest) {
         }
         if (!response.next) break;
         cursor = response.next;
+      }
+
+      // Mop-up pass: every other sync trigger (manual Gmail, Nexo, BBVA,
+      // Bancolombia) calls this after its month is fully paged, but the daily
+      // cron never did — so a transaction that missed categorization the first
+      // time (AI call cap, a rule that only got created later) had no route
+      // back to it and stayed "Sin categoría" forever, since the cron is the
+      // only thing that actually keeps this source syncing day to day.
+      try {
+        const recat = await recategorizeMonth(OWNER_USER_ID, syncMonth);
+        if (recat.updated > 0 || recat.classified > 0) {
+          console.log(`[sync/cron] recategorized ${syncMonth}: ${recat.updated} updated, ${recat.classified} reclassified`);
+        }
+      } catch (err) {
+        console.error(`[sync/cron] recategorizeMonth failed for ${syncMonth}:`, err instanceof Error ? err.message : err);
       }
     }
   } catch (err) {
