@@ -100,6 +100,58 @@ describe("nexoParser", () => {
     });
   });
 
+  describe("parses notifications with a currency symbol before the amount", () => {
+    // Regression (July 2026): "Pago de €0.91 en PAYPAL *PEACOCKTVLL" was stored
+    // as 91 USD, and "€9.12" as 912 USD, on the wrong account.
+    it("reads '€0.91' as 0.91 EUR, not 91", () => {
+      const tx = expectTransaction(
+        nexoParser({
+          ...basePayload,
+          text: "Pago de €0.91 en PAYPAL *PEACOCKTVLL. Cashback en cripto: 0.01322050 NEXO.",
+        }),
+      );
+      expect(tx.amount_native).toBe(0.91);
+      expect(tx.native_currency).toBe("EUR");
+      expect(tx.merchant).toBe("PAYPAL *PEACOCKTVLL");
+      expect(tx.account_name).toBe("Nexo Card");
+    });
+
+    it("reads '€9.12' as 9.12 EUR, not 912", () => {
+      const tx = expectTransaction(
+        nexoParser({ ...basePayload, text: "Pago de €9.12 en PAYPAL *FUBOTV. Cashback en cripto: 0.21579794 NEXO." }),
+      );
+      expect(tx.amount_native).toBe(9.12);
+      expect(tx.native_currency).toBe("EUR");
+    });
+
+    it("leaves a bare '$' to the card's own currency", () => {
+      const tx = expectTransaction(
+        nexoParser({ ...basePayload, text: "Pago de $13.00 en AMAZON MKTPLACE PMTS. Cashback en cripto: 0.23661821 NEXO." }),
+      );
+      expect(tx.amount_native).toBe(13);
+      expect(tx.native_currency).toBeNull();
+      expect(tx.merchant).toBe("AMAZON MKTPLACE PMTS");
+    });
+
+    it("parses a cash withdrawal in euros", () => {
+      const tx = expectTransaction(
+        nexoParser({ ...basePayload, text: "Retiro en efectivo de €20.78(23.75 USD) en Alpha Liquidity - Que." }),
+      );
+      expect(tx.amount_native).toBe(20.78);
+      expect(tx.native_currency).toBe("EUR");
+      expect(tx.merchant).toBe("Alpha Liquidity - Que");
+    });
+
+    it("stores a refund as a negative amount", () => {
+      const tx = expectTransaction(
+        nexoParser({ ...basePayload, text: "Reembolso de € 43.78(50.00 USD) de WWW.BEDSNDRINKS.COM." }),
+      );
+      expect(tx.amount_native).toBe(-43.78);
+      expect(tx.native_currency).toBe("EUR");
+      expect(tx.merchant).toBe("WWW.BEDSNDRINKS.COM");
+    });
+  });
+
   describe("ignores promotional notifications", () => {
     // These must resolve as "ignore", not "unknown": an unknown escalates to the
     // AI, which is both a wasted call and an invitation to invent an expense.
