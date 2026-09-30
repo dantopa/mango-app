@@ -25,7 +25,7 @@ const OWNER_USER_ID =
 // public credential. No secret set → every request is rejected.
 const SECRET = Deno.env.get("MAQUINITA_MCP_SECRET") ?? "";
 
-const SERVER_INFO = { name: "maquinita-mcp", version: "1.2.0" };
+const SERVER_INFO = { name: "maquinita-mcp", version: "1.3.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 const supabase = createClient(
