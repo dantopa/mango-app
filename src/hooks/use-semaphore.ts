@@ -67,6 +67,7 @@ export function useSemaphore() {
       const { data, error } = await supabase
         .from("transactions")
         .select("amount_usd")
+        .eq("status", "active")
         .eq("is_payment", false)
         .gte("tx_date", start)
         .lte("tx_date", end);

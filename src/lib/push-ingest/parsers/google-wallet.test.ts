@@ -144,6 +144,58 @@ describe("googleWalletParser — formats", () => {
     expect(result.kind).toBe("ignore");
   });
 
+  it("parses a charge with the currency after the amount (RappiCard via Wallet)", () => {
+    // Every one of these used to fall through to the AI, which stored them with
+    // no merchant, so they could never be matched with RappiCard's own
+    // "Tu compra en OCTAVA MARAVILLA MIRADOR" and were counted twice.
+    const tx = expectTransaction(
+      googleWalletParser({
+        ...basePayload,
+        title: "OCTAVA MARAVILLA MIRADOR",
+        text: "216.333 COP con Tarjeta Visa ••3679",
+      }),
+    );
+    expect(tx.amount_native).toBe(216333);
+    expect(tx.native_currency).toBe("COP");
+    expect(tx.merchant).toBe("OCTAVA MARAVILLA MIRADOR");
+    expect(tx.card_last4).toBe("3679");
+    expect(tx.account_name).toBe("Tarjeta Visa");
+  });
+
+  it("parses 'US$' written after a comma-decimal amount (Nexo Mastercard ••5667)", () => {
+    const tx = expectTransaction(
+      googleWalletParser({
+        ...basePayload,
+        title: "ANTHROPIC* CLAUDE SUB",
+        text: "100,00 US$ con Nexo Mastercard ••5667",
+      }),
+    );
+    expect(tx.amount_native).toBe(100);
+    expect(tx.native_currency).toBe("USD");
+    expect(tx.card_last4).toBe("5667");
+  });
+
+  it("recovers the merchant from the text when the title is missing", () => {
+    const tx = expectTransaction(
+      googleWalletParser({
+        ...basePayload,
+        title: "",
+        text: "UBR* PENDING.UBER.COM: 16.306 COP con Tarjeta Visa ••3679",
+      }),
+    );
+    expect(tx.merchant).toBe("UBR* PENDING.UBER.COM");
+    expect(tx.amount_native).toBe(16306);
+  });
+
+  it("ignores the feminine 'RECHAZADA' as a declined payment", () => {
+    const result = googleWalletParser({
+      ...basePayload,
+      title: "IKEA ENVIGADO",
+      text: "RECHAZADA: 147.890 COP con Tarjeta Visa ••3679",
+    });
+    expect(result.kind).toBe("ignore");
+  });
+
   it("ignores a notification with no card (boarding pass, promo)", () => {
     const result = googleWalletParser({ ...basePayload, text: "En horario: De MDE a CLO" });
     expect(result.kind).toBe("ignore");

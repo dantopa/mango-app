@@ -117,6 +117,11 @@ vi.mock("./supabase-admin", () => ({
 // Import modules after mocks
 // ---------------------------------------------------------------------------
 
+vi.mock("../reconcile/run", () => ({
+  loadOwnerIdentity: vi.fn(() => ({ names: [], keys: [] })),
+  reconcileAround: vi.fn(() => ({ changes: [], reviewFlags: [] })),
+}));
+
 import { executePipeline } from "./pipeline";
 import { getParser } from "./parser-registry";
 import { isDuplicate } from "./dedup";

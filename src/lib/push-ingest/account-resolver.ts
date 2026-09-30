@@ -86,6 +86,15 @@ export function resolveAccount(
     }
   }
 
+  // A notification that names a card we have not mapped was still charged to a
+  // card, so only accounts that have cards may take it. Without this, the new
+  // "Nexo Mastercard ••5667" matched the token "Nexo" and was filed under the
+  // USDT wallet instead of the card account.
+  const nameCandidates = cardLast4 ? accounts.filter((a) => a.card_digits.length > 0) : accounts;
+  if (cardLast4) {
+    console.warn(`[push-ingest][account] card ••${cardLast4} is not mapped to any account; falling back to the name`);
+  }
+
   if (accountName) {
     const hint = normalize(accountName);
     if (hint !== "") {
@@ -96,7 +105,7 @@ export function resolveAccount(
         (name, h) => ` ${h} `.includes(` ${name} `),
         (name, h) => h.includes(name),
       ];
-      const candidates = accounts.map((account) => ({ account, normalized: normalize(account.name) }));
+      const candidates = nameCandidates.map((account) => ({ account, normalized: normalize(account.name) }));
       for (const matches of strategies) {
         const found = uniqueBestMatch(candidates, hint, matches);
         if (found === "ambiguous") {

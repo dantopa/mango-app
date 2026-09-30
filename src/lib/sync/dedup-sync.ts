@@ -95,7 +95,7 @@ export async function evaluateCandidate(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: existingTxs, error: txError } = await (supabase as any)
     .from("transactions")
-    .select("id, merchant, amount_native, tx_date, description_raw")
+    .select("id, merchant, amount_native, tx_date, description_raw, status")
     .eq("user_id", userId)
     .eq("amount_native", candidate.amount_native)
     .gte("tx_date", dateFrom)
@@ -111,12 +111,16 @@ export async function evaluateCandidate(
   if (existingTxs && existingTxs.length > 0) {
     // Filter out existing transactions that have already been fully consumed
     // by previous candidates in this batch run
+    // A released hold or an internal transfer is not a purchase to match against.
+    const purchases = (existingTxs as Array<{ id: string; status?: string }>).filter(
+      (tx) => tx.status !== "voided" && tx.status !== "internal_transfer",
+    );
     const availableTxs = consumptionMap
-      ? (existingTxs as Array<{ id: string }>).filter((tx) => {
+      ? purchases.filter((tx) => {
           const consumed = consumptionMap.get(tx.id) ?? 0;
           return consumed < 1;
         })
-      : existingTxs;
+      : purchases;
 
     // If all existing matches have been consumed by earlier candidates in this
     // batch, this occurrence is a surplus real purchase (Req 7.9: exactly

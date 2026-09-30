@@ -95,6 +95,19 @@ describe("resolveAccount", () => {
     );
   });
 
+  it("never files an unmapped card under an account that has no cards", () => {
+    // "Se ha reembolsado en la tarjeta Nexo Mastercard ••5667 …" before ••5667
+    // was mapped: the name matched the token "Nexo" — the USDT wallet.
+    const result = resolveAccount(ACCOUNTS, { cardLast4: "5667", accountName: "Nexo Mastercard" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("••5667");
+  });
+
+  it("resolves the new Nexo card once its digits are mapped", () => {
+    const mapped = ACCOUNTS.map((a) => (a.name === "Nexo Card" ? { ...a, card_digits: ["4186", "5667"] } : a));
+    expectResolved(resolveAccount(mapped, { cardLast4: "5667", accountName: "Nexo Mastercard" }), "Nexo Card", "card");
+  });
+
   it("reports what it tried when nothing resolves", () => {
     const result = resolveAccount(ACCOUNTS, { cardLast4: "5333", accountName: "AstroPay" });
     expect(result.ok).toBe(false);

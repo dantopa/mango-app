@@ -9,7 +9,10 @@ import { detectCurrency, parseAmount } from "../money";
  *
  *   charge   "$14.25 con Mastercard Nexo Card ••4186"
  *   charge   "COP7,525.00 con TARJETA NEGRA RAPPICARD CO ••3679"
+ *   charge   "140.289 COP con Tarjeta Visa ••3679"        (currency after the amount)
+ *   charge   "5,00 US$ con Nexo Mastercard ••5667"
  *   declined "RECHAZADO: $50.00 pagado con Signature ••9253"
+ *   declined "RECHAZADA: 147.890 COP con Tarjeta Visa ••3679"
  *   refund   "Se reembolsó un importe de -COP124,414.00 en TARJETA NEGRA RAPPICARD CO ••3679"
  *   refund   "Se ha reembolsado en la tarjeta Nexo Mastercard ••4186 el siguiente importe: -11.475 COP"
  *   other    "En horario: De MDE a CLO"  (boarding pass — no card, no amount)
@@ -33,8 +36,28 @@ const DEFAULT_CURRENCY = "USD";
 /** Amount plus the card it was charged to: "<amount> con|en <label> ••1234". */
 const RE_CHARGE = /([-−]?\s*(?:COP|ARS|USD|US\$|R\$|€|\$)\s*[\d.,]+)\s+(?:con|en)\s+(.+?)\s*••(\d{4})/i;
 
-/** Google Wallet marks a declined attempt with a leading RECHAZADO/DECLINED. */
-const RE_DECLINED = /^\s*(?:RECHAZADO|DECLINED)\b/i;
+/**
+ * The same charge with the currency written after the amount. This is how
+ * Wallet phrases every RappiCard and Nexo Mastercard purchase since Aug 2026;
+ * none of them matched RE_CHARGE, so they all went to the AI, which stored them
+ * without a merchant — and a purchase without a merchant cannot be matched to
+ * RappiCard's own notification of it, so each one was counted twice.
+ */
+const RE_CHARGE_SUFFIX =
+  /([-−]?\s*[\d.,]+)\s*(COP|ARS|USDT|USD|EUR|BRL|MXN|CLP|PEN|UYU|GBP|US\$|R\$|€)\s+(?:con|en)\s+(.+?)\s*••(\d{4})/i;
+
+/** Currency symbols Wallet writes after the amount. */
+const SUFFIX_SYMBOLS: Record<string, string> = { "US$": "USD", "R$": "BRL", "€": "EUR" };
+
+/**
+ * Google Wallet marks a declined attempt with a leading RECHAZADO/RECHAZADA/
+ * DECLINED. The feminine form ("RECHAZADA: 147.890 COP …") used to slip through
+ * to the AI.
+ */
+const RE_DECLINED = /^\s*(?:RECHAZAD[OA]|DECLINED)\b/i;
+
+/** Some forwarders fold the title into the text: "IKEA ENVIGADO: 77.100 COP con …". */
+const RE_MERCHANT_PREFIX = /^\s*([^:]+?):\s*[-−]?\s*[\d.,]+/;
 
 /** Refunds are phrased as a reimbursement and carry a negative amount. */
 const RE_REFUND = /se reembols|refunded/i;
@@ -69,6 +92,28 @@ export const googleWalletParser: ParserFn = (payload: PushPayload): ParseResult 
   }
 
   const match = text.match(RE_CHARGE);
+  const suffixMatch = match ? null : text.match(RE_CHARGE_SUFFIX);
+  if (suffixMatch) {
+    const [, amountRaw, currencyRaw, cardLabel, cardDigits] = suffixMatch;
+    const currency = SUFFIX_SYMBOLS[currencyRaw.toUpperCase()] ?? currencyRaw.toUpperCase();
+    const amount = parseAmount(amountRaw, currency);
+    if (amount === null || amount === 0) return { kind: "unknown" };
+    const merchant = title?.trim() || text.match(RE_MERCHANT_PREFIX)?.[1]?.trim() || null;
+    const isRefund = RE_REFUND.test(text);
+    return {
+      kind: "transaction",
+      tx: {
+        amount_native: isRefund ? -Math.abs(amount) : Math.abs(amount),
+        native_currency: currency,
+        merchant,
+        tx_date: resolveTxDate(payload.timestamp),
+        description_raw: `${title} - ${text}`,
+        account_name: cardLabel.trim(),
+        card_last4: cardDigits,
+      },
+    };
+  }
+
   if (!match) {
     const refundMatch = text.match(RE_REFUND_SUFFIX);
     if (refundMatch) {

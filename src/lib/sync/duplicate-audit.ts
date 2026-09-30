@@ -285,6 +285,8 @@ export async function auditMonth(userId: string, month: string): Promise<AuditRe
     .from("transactions")
     .select("id, tx_date, amount_native, native_currency, merchant, description_raw, source, account_id, card_last4")
     .eq("user_id", userId)
+    // Rows reconciliation already ruled out are not candidates again.
+    .eq("status", "active")
     .gte("tx_date", `${month}-01`)
     .lte("tx_date", monthEnd(month))
     .order("tx_date", { ascending: true });

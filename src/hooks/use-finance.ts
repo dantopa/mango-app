@@ -112,6 +112,9 @@ export function useTransactions() {
         supabase
           .from("transactions")
           .select("*, account:accounts(id,name,type), category:categories(id,name,color)")
+          // Duplicates, released holds and internal transfers stay in the table
+          // for audit, but they are not transactions the owner made.
+          .eq("status", "active")
           // `tx_date` repeats heavily, and ranges over a non-deterministic sort
           // skip and duplicate rows, so `id` breaks the ties.
           .order("tx_date", { ascending: false })
