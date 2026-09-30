@@ -15,6 +15,8 @@ export type ReconcileRule =
   | "duplicate_notification"
   /** A pre-authorization and its release: both cancel out. */
   | "preauth_released"
+  /** A pre-authorization replaced by the provider's final charge, with no release notified. */
+  | "preauth_superseded"
   /** Money moved between two of the owner's own accounts. */
   | "internal_transfer"
   /** A previous automatic decision no longer holds. */

@@ -272,6 +272,80 @@ describe("reconcile — Bug 2: ride-hailing holds and their release", () => {
   });
 });
 
+describe("reconcile — Uber hold replaced by the final charge, with no release", () => {
+  const at = (t: string) => `2026-09-30T${t}Z`;
+  const walletPending = (amount: number, t: string) =>
+    walletCharge("UBR* PENDING.UBER.COM", amount, at(t), { merchant: "UBR* PENDING.UBER.COM" });
+  const walletTrip = (amount: number, t: string) =>
+    walletCharge("UBER   *TRIP", amount, at(t), { merchant: "UBER   *TRIP" });
+
+  it("voids the hold when the final charge arrives (30-sep: 9.956 hold, 10.561 trip)", () => {
+    const hold = rappi("Uber", 9956, "2026-09-30T21:46:49Z");
+    const holdEcho = walletPending(9956, "21:46:55");
+    const trip = walletTrip(10561, "21:57:46");
+    const rows = [hold, holdEcho, trip];
+    const result = run(rows);
+
+    expect(activeIds(rows, result)).toEqual([trip.id]);
+    expect(result.changes.find((c) => c.id === hold.id)?.to).toMatchObject({
+      status: "voided",
+      paired_with: trip.id,
+      status_reason: "preauth_superseded",
+    });
+  });
+
+  it("prefers the release when it does arrive", () => {
+    const hold = rappi("Uber", 11202, "2026-08-23T22:58:43Z");
+    const holdEcho = walletCharge("UBR* PENDING.UBER.COM", 11202, "2026-08-23T22:58:47Z", { merchant: "UBR* PENDING.UBER.COM" });
+    const trip = walletCharge("UBER   *TRIP", 12511, "2026-08-23T23:26:09Z", { merchant: "UBER   *TRIP" });
+    const release = walletRelease(11202, "2026-08-23T23:26:32Z");
+    const result = run([hold, holdEcho, trip, release]);
+
+    expect(result.changes.find((c) => c.id === hold.id)?.rule).toBe("preauth_released");
+    expect(statuses([hold, holdEcho, trip, release], result)[trip.id]).toBe("active");
+  });
+
+  it("switches to the release when it arrives after the hold was superseded", () => {
+    const hold = rappi("Uber", 9956, "2026-09-30T21:46:49Z");
+    const holdEcho = walletPending(9956, "21:46:55");
+    const trip = walletTrip(10561, "21:57:46");
+    const first = applied([hold, holdEcho, trip], run([hold, holdEcho, trip]));
+    const release = walletRelease(9956, at("22:20:00"));
+    const result = run([...first, release]);
+
+    expect(result.changes.find((c) => c.id === hold.id)?.to).toMatchObject({ status: "voided", status_reason: "preauth_released" });
+    expect(statuses([...first, release], result)[trip.id]).toBe("active");
+  });
+
+  it("keeps a PENDING charge that no final charge follows: it is the real one", () => {
+    const pending = walletPending(7930, "15:28:31");
+    const rows = [rappi("Uber", 7930, "2026-09-30T15:28:28Z"), pending];
+    expect(activeIds(rows)).toHaveLength(1);
+    expect(run(rows).changes.some((c) => c.rule === "preauth_superseded")).toBe(false);
+  });
+
+  it("does not supersede with a trip too late or too different to be the same ride", () => {
+    const hold = walletPending(12960, "16:53:00");
+    const lateTrip = walletTrip(12900, "19:36:00"); // 2h43m later
+    const otherTrip = walletTrip(26000, "17:10:00"); // twice the hold
+    expect(activeIds([hold, lateTrip, otherTrip])).toEqual([hold.id, lateTrip.id, otherTrip.id]);
+  });
+
+  it("uses each final charge for one hold only", () => {
+    const hold1 = walletPending(14639, "19:14:00");
+    const hold2 = walletPending(14700, "19:20:00");
+    const trip = walletTrip(15343, "19:36:00");
+    const s = statuses([hold1, hold2, trip], run([hold1, hold2, trip]));
+    expect([s[hold1.id], s[hold2.id]].filter((x) => x === "voided")).toHaveLength(1);
+    expect(s[trip.id]).toBe("active");
+  });
+
+  it("is stable when re-run over its own output", () => {
+    const rows = [rappi("Uber", 9956, "2026-09-30T21:46:49Z"), walletPending(9956, "21:46:55"), walletTrip(10561, "21:57:46")];
+    expect(run(applied(rows, run(rows))).changes).toEqual([]);
+  });
+});
+
 describe("reconcile — Bug 3: transfers between the owner's accounts", () => {
   const transferToSelf = () =>
     row({
