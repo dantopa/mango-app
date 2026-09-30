@@ -49,6 +49,18 @@ export const SUSPICIOUS_REPEAT_MS = 10 * 60 * 1000;
 /** A release refunds a hold placed at most this many days before. */
 export const PREAUTH_LOOKBACK_DAYS = 3;
 
+/**
+ * Uber's final charge ("UBER *TRIP") lands within about half an hour of its
+ * hold ("UBR* PENDING.UBER.COM") — 20 to 56 minutes across Aug–Sep 2026 — and
+ * differs from it by what the trip ended up costing.
+ */
+export const SUPERSEDE_WINDOW_MS = 60 * 60 * 1000;
+export const SUPERSEDE_AMOUNT_RATIO = 1.3;
+
+/** How a provider names a hold and a final charge. */
+const RE_HOLD_DESCRIPTOR = /PENDING/i;
+const RE_CAPTURE_DESCRIPTOR = /\*\s*TRIP\b/i;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type ReconcileOptions = {
@@ -324,6 +336,63 @@ export function reconcile(rows: readonly ReconcileRow[], options: ReconcileOptio
       rule: "preauth_released",
       ref_id: hold.id,
       detail: `libera la retención ${hold.id} (${describe(hold)}): ${describe(release)}`,
+    });
+  }
+
+  // 3b. Holds superseded by the final charge. Nine in ten Uber holds get a
+  // release notification; the rest never do, and the hold would stay counted
+  // next to the real charge ("UBR* PENDING 18.428" + "UBER *TRIP 18.538" on
+  // 5-sep). A hold is recognised by its descriptor on any notification of the
+  // purchase, since RappiCard names both just "Uber". A hold with no later
+  // capture is left alone: often "PENDING" is the only charge Uber ever sends.
+  const members = new Map<string, ReconcileRow[]>();
+  for (const row of rows) {
+    const state = stateOf(row);
+    const lead = state.status === "duplicate" && state.duplicate_of ? state.duplicate_of : row.id;
+    members.set(lead, [...(members.get(lead) ?? []), row]);
+  }
+  const describedAs = (row: ReconcileRow, pattern: RegExp) =>
+    (members.get(row.id) ?? [row]).some((m) => pattern.test(effectiveMerchant(m.merchant, m.description_raw) ?? ""));
+
+  const openCharges = rows
+    .filter((r) => !r.status_manual && stateOf(r).status === "active" && !r.is_payment && r.amount_native > 0)
+    .filter((r) => providerOf(effectiveMerchant(r.merchant, r.description_raw)) !== null && tsOf(r) !== null);
+  const openHolds = openCharges
+    .filter((r) => describedAs(r, RE_HOLD_DESCRIPTOR) && !describedAs(r, RE_CAPTURE_DESCRIPTOR))
+    .sort((a, b) => sortTime(a) - sortTime(b) || a.id.localeCompare(b.id));
+  const captures = openCharges.filter((r) => describedAs(r, RE_CAPTURE_DESCRIPTOR));
+  const usedCaptures = new Set<string>();
+
+  for (const hold of openHolds) {
+    const holdTs = tsOf(hold)!;
+    const provider = providerOf(effectiveMerchant(hold.merchant, hold.description_raw));
+    const capture = captures
+      .filter((c) => !usedCaptures.has(c.id))
+      .filter((c) => {
+        const ts = tsOf(c)!;
+        const ratio = c.amount_native / hold.amount_native;
+        return (
+          c.account_id === hold.account_id &&
+          c.native_currency === hold.native_currency &&
+          providerOf(effectiveMerchant(c.merchant, c.description_raw)) === provider &&
+          ts > holdTs &&
+          ts - holdTs <= SUPERSEDE_WINDOW_MS &&
+          ratio <= SUPERSEDE_AMOUNT_RATIO &&
+          ratio >= 1 / SUPERSEDE_AMOUNT_RATIO
+        );
+      })
+      .sort((a, b) => sortTime(a) - sortTime(b) || a.id.localeCompare(b.id))[0];
+
+    if (!capture) continue;
+    usedCaptures.add(capture.id);
+    desired.set(hold.id, {
+      status: "voided",
+      duplicate_of: null,
+      paired_with: capture.id,
+      status_reason: "preauth_superseded",
+      rule: "preauth_superseded",
+      ref_id: capture.id,
+      detail: `retención reemplazada por el cobro final ${capture.id} (${describe(capture)}): ${describe(hold)}`,
     });
   }
 
