@@ -445,6 +445,29 @@ describe("reconcile — idempotency, ordering and audit", () => {
     expect(result.changes[0].to.duplicate_of).toBe(keptByHand.id);
   });
 
+  it("keeps the echoes of a purchase a person ruled out as duplicates, instead of promoting one", () => {
+    // INVERSIONES LA GUARDIA 60.000: Wallet notified three holds; the owner voided
+    // the canonical one by hand. The other two must not come back as spend.
+    const voidedByHand = walletCharge("INVERSIONES LA GUARDIA", 60000, "2026-09-26T04:48:05Z", {
+      status: "voided",
+      status_manual: true,
+      status_reason: "manual",
+    });
+    const echo1 = walletCharge("INVERSIONES LA GUARDIA", 60000, "2026-09-26T04:54:12Z", {
+      status: "duplicate",
+      duplicate_of: voidedByHand.id,
+      status_reason: "duplicate_notification",
+    });
+    const echo2 = walletCharge("INVERSIONES LA GUARDIA", 60000, "2026-09-26T05:34:05Z", {
+      status: "duplicate",
+      duplicate_of: voidedByHand.id,
+      status_reason: "duplicate_notification",
+    });
+    const rows = [voidedByHand, echo1, echo2];
+    expect(run(rows).changes).toEqual([]);
+    expect(activeIds(rows)).toEqual([]);
+  });
+
   it("restores a row whose earlier automatic decision no longer holds", () => {
     const orphan = walletCharge("IKEA ENVIGADO", 77100, "2026-09-08T22:00:37Z", {
       status: "duplicate",

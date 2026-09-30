@@ -116,13 +116,14 @@ function isSamePurchase(a: ReconcileRow, b: ReconcileRow): boolean {
 }
 
 /**
- * Which row of a duplicate group survives: one a person kept, then the one with
+ * Which row of a duplicate group stands for the purchase: one a person decided
+ * on (kept, or ruled out — its echoes follow it either way), then the one with
  * a stored merchant, then the issuer's own notification over Google Wallet's
  * echo, then the earliest. `id` makes the choice total, hence deterministic.
  */
 function canonicalOrder(a: ReconcileRow, b: ReconcileRow): number {
   const keys = (r: ReconcileRow) => [
-    r.status_manual ? 0 : 1,
+    r.status_manual ? (r.status === "active" ? 0 : 1) : 2,
     r.merchant?.trim() ? 0 : 1,
     r.origin === GOOGLE_WALLET ? 1 : 0,
   ];
@@ -247,9 +248,11 @@ export function reconcile(rows: readonly ReconcileRow[], options: ReconcileOptio
     });
   }
 
-  // 2. Duplicate notifications. Manual non-active rows are out; a manual active
-  // row takes part and is always the one kept.
-  const dedupePool = rows.filter((r) => stateOf(r).status === "active");
+  // 2. Duplicate notifications. A row a person decided on takes part and always
+  // leads its group: if they kept it, the echoes are its duplicates; if they
+  // ruled it out (a phantom hold), the echoes are duplicates of a non-purchase
+  // and must not step up to replace it.
+  const dedupePool = rows.filter((r) => r.status_manual || stateOf(r).status === "active");
   for (const group of groupDuplicates(dedupePool)) {
     if (group.length < 2) continue;
     const [canonical, ...others] = [...group].sort(canonicalOrder);
