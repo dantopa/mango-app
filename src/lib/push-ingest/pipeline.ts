@@ -16,6 +16,9 @@ import { resolveDuplicate } from "../sync/dedup-core";
 import type { DedupCandidate } from "../sync/dedup-core";
 import type { Database } from "../supabase/database.types";
 import { shouldTryLlmFallback, tryTemplateParser, llmFallbackParser } from "./parsers/llm-fallback";
+import { matchInternalTransfer } from "../reconcile/owner";
+import { loadOwnerIdentity, reconcileAround } from "../reconcile/run";
+import type { TxStatus } from "../reconcile/types";
 import "./parsers"; // side-effect: registers all parsers
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
@@ -324,6 +327,18 @@ export async function executePipeline(
     return { status: "registered", transaction_id: "transfer-skipped" };
   }
 
+  // 8b. Transfer between the owner's own accounts: registered (never deleted,
+  // so it stays auditable) but outside spend and income from the start.
+  const internalTransfer = matchInternalTransfer(
+    { merchant: resolved.merchant, description_raw: resolved.description_raw },
+    await loadOwnerIdentity(supabase, OWNER_USER_ID),
+  );
+  if (internalTransfer) {
+    console.log(
+      `[push-ingest][reconcile] rule=internal_transfer ${internalTransfer.via}=${internalTransfer.value} dedup_key=${dedupKey}`,
+    );
+  }
+
   // 9. FX conversion (before dedup so amount_usd is available for cross-currency matching)
   const fxResult = await resolveRate(resolved.native_currency);
   if (!fxResult.ok) {
@@ -412,7 +427,7 @@ export async function executePipeline(
   // Las categorías son de gasto: un ingreso queda sin categoría, y eso no es una
   // revisión pendiente ni vale una llamada de IA.
   let categoryId: string | null = null;
-  let catMatched = resolved.is_income === true;
+  let catMatched = resolved.is_income === true || internalTransfer !== null;
 
   if (!catMatched) {
     const catResult = await categorize(resolved.merchant, OWNER_USER_ID, resolved.description_raw);
@@ -454,6 +469,8 @@ export async function executePipeline(
       expense_type: "variable",
       card_last4: resolved.card_last4 ?? null,
       external_ts: externalTs,
+      status: internalTransfer ? "internal_transfer" : "active",
+      status_reason: internalTransfer ? "internal_transfer" : null,
     })
     .select("id")
     .single();
@@ -474,6 +491,26 @@ export async function executePipeline(
     amount_usd: amountUsd,
   });
 
+  // 13b. Reconcile the neighbourhood: this notification may be the second
+  // notice of a purchase already stored, or the release of a hold. Notifications
+  // arrive seconds apart and in any order, so the decision is re-made over the
+  // surrounding days rather than against this row alone; the reconcile job
+  // re-runs the same thing over the last week to catch whatever races past.
+  let txStatus: TxStatus = internalTransfer ? "internal_transfer" : "active";
+  try {
+    const report = await reconcileAround(supabase, OWNER_USER_ID, resolved.tx_date);
+    txStatus = report.changes.find((c) => c.id === txData.id)?.to.status ?? txStatus;
+  } catch (e) {
+    console.error("[push-ingest][reconcile] error:", e instanceof Error ? e.message : e);
+  }
+
+  // A duplicate, a released hold or an internal transfer changes nothing the
+  // owner needs to hear about: no semaphore, no push.
+  if (txStatus !== "active") {
+    console.log(`[push-ingest] ${txData.id} registered as ${txStatus}; skipping semaphore and push`);
+    return { status: "registered", transaction_id: txData.id, tx_status: txStatus };
+  }
+
   // 14. Evaluate semaphore and alert if state changed
   let semaphoreResult = undefined;
   try {
@@ -488,6 +525,7 @@ export async function executePipeline(
       .from("transactions")
       .select("amount_usd")
       .eq("user_id", OWNER_USER_ID)
+      .eq("status", "active")
       .eq("is_payment", false)
       .gte("tx_date", monthStart)
       .lte("tx_date", monthEnd);
@@ -570,5 +608,5 @@ export async function executePipeline(
     console.error("[push-ingest][web-push] error:", e);
   }
 
-  return { status: "registered", transaction_id: txData.id, semaphore: semaphoreResult };
+  return { status: "registered", transaction_id: txData.id, tx_status: txStatus, semaphore: semaphoreResult };
 }

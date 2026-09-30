@@ -267,6 +267,8 @@ export async function recategorizeMonth(
     .from("transactions")
     .select("id, merchant, description_raw")
     .eq("user_id", userId)
+    // Rows ruled out by reconciliation are not worth an AI call.
+    .eq("status", "active")
     .is("category_id", null)
     .gte("tx_date", monthStart)
     .lte("tx_date", monthEnd);

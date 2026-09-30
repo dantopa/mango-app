@@ -104,6 +104,13 @@ vi.mock("./parsers/llm-fallback", () => ({
 // Side-effect import mock (parsers registration)
 vi.mock("./parsers", () => ({}));
 
+// Reconciliation has its own tests (src/lib/reconcile); here only its effect on
+// the pipeline matters.
+vi.mock("../reconcile/run", () => ({
+  loadOwnerIdentity: vi.fn(() => ({ names: ["PATRICIO EDUARDO DANDREA ESCODA"], keys: ["3007570391"] })),
+  reconcileAround: vi.fn(() => ({ changes: [], reviewFlags: [] })),
+}));
+
 import { executePipeline } from "./pipeline";
 import { isDuplicate } from "./dedup";
 import { getParser } from "./parser-registry";
@@ -112,6 +119,8 @@ import { shouldTryLlmFallback, tryTemplateParser, llmFallbackParser } from "./pa
 import { classifyTransaction } from "./classifier";
 import { resolveDuplicate } from "../sync/dedup-core";
 import { epochToLocalDate, TZ_OFFSETS } from "./dates";
+import { reconcileAround } from "../reconcile/run";
+import { sendPushNotification } from "./web-push";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
@@ -408,6 +417,57 @@ describe("executePipeline", () => {
       'violates check constraint "chk_ingest_status"',
     );
     consoleError.mockRestore();
+  });
+
+  describe("reconciliation", () => {
+    it("reconciles the days around the new transaction after inserting it", async () => {
+      await executePipeline(basePayload, "full_pipeline");
+      expect(reconcileAround).toHaveBeenCalledWith(expect.anything(), OWNER_USER_ID, today);
+      expect(insertedTransaction()?.status).toBe("active");
+    });
+
+    it("does not notify a purchase that turned out to be a duplicate", async () => {
+      vi.mocked(reconcileAround).mockResolvedValueOnce({
+        changes: [{ id: "tx-001", to: { status: "duplicate" } }],
+        reviewFlags: [],
+      } as unknown as Awaited<ReturnType<typeof reconcileAround>>);
+
+      const result = await executePipeline(basePayload, "full_pipeline");
+
+      expect(result).toMatchObject({ status: "registered", transaction_id: "tx-001", tx_status: "duplicate" });
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it("still registers the purchase when reconciliation fails", async () => {
+      vi.mocked(reconcileAround).mockRejectedValueOnce(new Error("db down"));
+      const result = await executePipeline(basePayload, "full_pipeline");
+      expect(result).toMatchObject({ status: "registered", tx_status: "active" });
+      expect(sendPushNotification).toHaveBeenCalled();
+    });
+
+    it("stores a transfer to the owner as internal, uncategorized and unannounced", async () => {
+      const text =
+        "Bancolombia: PATRICIO, transferiste $1,000,000.00 a la llave 3007570391 desde tu cuenta *9898 a PATRICIO EDUARDO DANDREA ESCODA el 12/09/26 a las 17:44";
+      vi.mocked(getParser).mockReturnValue(() =>
+        transactionOf({
+          ...parsedTx,
+          amount_native: 1_000_000,
+          merchant: null,
+          description_raw: text,
+          account_name: "Rappi",
+        }),
+      );
+
+      const result = await executePipeline({ ...basePayload, text }, "full_pipeline");
+
+      expect(insertedTransaction()).toMatchObject({
+        status: "internal_transfer",
+        status_reason: "internal_transfer",
+        category_id: null,
+      });
+      expect(result).toMatchObject({ status: "registered", tx_status: "internal_transfer" });
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
   });
 
   it("handles transfer classification (skips insertion)", async () => {

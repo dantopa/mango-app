@@ -25,7 +25,7 @@ const OWNER_USER_ID =
 // public credential. No secret set → every request is rejected.
 const SECRET = Deno.env.get("MAQUINITA_MCP_SECRET") ?? "";
 
-const SERVER_INFO = { name: "maquinita-mcp", version: "1.2.0" };
+const SERVER_INFO = { name: "maquinita-mcp", version: "1.3.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 const supabase = createClient(
@@ -338,9 +338,13 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
   async leer_transacciones(args) {
     let q = supabase
       .from("transactions")
-      .select("id, tx_date, merchant, description_raw, amount_native, native_currency, amount_usd, account_id, category:categories(name), is_payment, source, card_last4, expense_type")
+      .select("id, tx_date, merchant, description_raw, amount_native, native_currency, amount_usd, account_id, category:categories(name), is_payment, kind, source, card_last4, expense_type, status, status_reason, duplicate_of, paired_with")
       .eq("user_id", OWNER_USER_ID)
       .order("tx_date", { ascending: false });
+
+    // Duplicates, released holds and internal transfers are hidden unless asked
+    // for: they are kept for audit, not because they happened.
+    if (!args.incluir_descartadas) q = q.eq("status", "active");
 
     if (args.month) {
       const monthStart = `${args.month}-01`;
@@ -403,6 +407,19 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
     if (args.amount_usd !== undefined) patch.amount_usd = args.amount_usd;
     if (args.category_name !== undefined || args.category_id !== undefined) {
       patch.category_id = await resolveCategory(args);
+    }
+    if (args.status !== undefined) {
+      if (!["active", "duplicate", "voided", "internal_transfer"].includes(args.status)) {
+        throw new Error("status debe ser active | duplicate | voided | internal_transfer");
+      }
+      // A person's decision: the reconciler never overrides it afterwards.
+      patch.status = args.status;
+      patch.status_manual = true;
+      patch.status_reason = "manual";
+      if (args.status === "active") {
+        patch.duplicate_of = null;
+        patch.paired_with = null;
+      }
     }
     if (Object.keys(patch).length === 0) throw new Error("Nada que actualizar");
     const { data, error } = await supabase
@@ -489,15 +506,32 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
   },
 
   async leer_resumen_gastos(args) {
-    const { data, error } = await supabase
-      .from("transactions")
-      .select("amount_usd, is_payment, tx_date, category:categories(name)")
-      .eq("user_id", OWNER_USER_ID);
-    if (error) throw new Error(error.message);
-
-    const rows = (data ?? []).filter((t) => !t.is_payment && t.amount_usd > 0);
+    // Only active rows count: duplicates, released pre-authorizations and
+    // internal transfers are kept for audit, never summed. The month filter
+    // runs in the query — filtering in JS silently truncated at PostgREST's
+    // 1000-row page once the table grew past it.
     const month: string | undefined = args?.month;
-    const scoped = month ? rows.filter((t) => t.tx_date.slice(0, 7) === month) : rows;
+    const scoped: Array<{ amount_usd: number; is_payment: boolean; tx_date: string; category: unknown }> = [];
+    for (let offset = 0; ; offset += 1000) {
+      let q = supabase
+        .from("transactions")
+        .select("amount_usd, is_payment, tx_date, category:categories(name)")
+        .eq("user_id", OWNER_USER_ID)
+        .eq("status", "active")
+        .eq("is_payment", false)
+        .gt("amount_usd", 0)
+        .order("id")
+        .range(offset, offset + 999);
+      if (month) {
+        const [y, m] = month.split("-").map(Number);
+        const lastDay = new Date(y, m, 0).getDate();
+        q = q.gte("tx_date", `${month}-01`).lte("tx_date", `${month}-${String(lastDay).padStart(2, "0")}`);
+      }
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      scoped.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
 
     const byCat: Record<string, number> = {};
     let total = 0;
@@ -741,11 +775,15 @@ const TOOLS = [
   {
     name: "leer_transacciones",
     description:
-      "Lista transacciones con filtros. Usalo para buscar duplicados, verificar cargas, o inspeccionar qué hay. Devuelve id, fecha, merchant, monto, moneda, cuenta, categoría, source, card_last4.",
+      "Lista transacciones con filtros. Devuelve id, fecha, merchant, monto, moneda, cuenta, categoría, kind (expense|income|payment), source, card_last4 y status. Por defecto sólo las activas: los duplicados, retenciones liberadas y transferencias propias ya los marca el reconciliador automático.",
     inputSchema: {
       type: "object",
       properties: {
         month: { type: "string", description: "Filtrar por mes YYYY-MM (opcional)." },
+        incluir_descartadas: {
+          type: "boolean",
+          description: "true para incluir las marcadas como duplicate / voided / internal_transfer (auditoría).",
+        },
         account_name: { type: "string", description: "Filtrar por nombre de cuenta (opcional)." },
         limit: { type: "number", description: "Máximo de resultados (default 100)." },
       },
@@ -788,6 +826,11 @@ const TOOLS = [
         native_currency: { type: "string" },
         fx_rate_to_usd: { type: "number" },
         amount_usd: { type: "number" },
+        status: {
+          type: "string",
+          description:
+            "active | duplicate | voided | internal_transfer. Marca la decisión como manual: el reconciliador no la vuelve a tocar. Preferilo a eliminar.",
+        },
         ...categoryRef,
       },
       required: ["transaction_id"],
@@ -807,7 +850,7 @@ const TOOLS = [
   {
     name: "leer_resumen_gastos",
     description:
-      "Devuelve total y desglose por categoría de un mes (YYYY-MM; sin mes = todo). Excluye pagos/devoluciones.",
+      "Devuelve total y desglose por categoría de un mes (YYYY-MM; sin mes = todo). Cuenta sólo gastos activos: excluye pagos/devoluciones, duplicados, retenciones liberadas y transferencias propias.",
     inputSchema: {
       type: "object",
       properties: { month: { type: "string", description: "Mes YYYY-MM. Opcional." } },

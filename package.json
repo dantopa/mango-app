@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest --run",
     "test:watch": "vitest",
+    "reconcile:backfill": "vite-node --config vitest.config.ts scripts/backfill-reconcile.ts --",
     "analyze": "ANALYZE=true next build",
     "lighthouse:ci": "lhci autorun"
   },

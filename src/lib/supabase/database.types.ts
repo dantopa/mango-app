@@ -539,6 +539,63 @@ export type Database = {
         }
         Relationships: []
       }
+      transaction_reconcile_log: {
+        Row: {
+          created_at: string
+          detail: string | null
+          from_status: string
+          id: string
+          ref_transaction_id: string | null
+          rule: string
+          run_id: string
+          to_status: string
+          transaction_id: string
+          trigger: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          detail?: string | null
+          from_status: string
+          id?: string
+          ref_transaction_id?: string | null
+          rule: string
+          run_id: string
+          to_status: string
+          transaction_id: string
+          trigger: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          detail?: string | null
+          from_status?: string
+          id?: string
+          ref_transaction_id?: string | null
+          rule?: string
+          run_id?: string
+          to_status?: string
+          transaction_id?: string
+          trigger?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transaction_reconcile_log_ref_transaction_id_fkey"
+            columns: ["ref_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_reconcile_log_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       transactions: {
         Row: {
           account_id: string
@@ -549,6 +606,7 @@ export type Database = {
           country: string
           created_at: string
           description_raw: string
+          duplicate_of: string | null
           expense_type: string
           external_ts: string | null
           fx_rate_to_usd: number
@@ -556,12 +614,17 @@ export type Database = {
           installments: string | null
           is_extraordinary: boolean
           is_payment: boolean
+          kind: string | null
           merchant: string | null
           native_currency: string
           needs_review: boolean
+          paired_with: string | null
           payment_type: string | null
           source: string
           statement_period: string | null
+          status: string
+          status_manual: boolean
+          status_reason: string | null
           tx_date: string
           user_id: string
         }
@@ -574,6 +637,7 @@ export type Database = {
           country?: string
           created_at?: string
           description_raw: string
+          duplicate_of?: string | null
           expense_type?: string
           external_ts?: string | null
           fx_rate_to_usd: number
@@ -581,12 +645,17 @@ export type Database = {
           installments?: string | null
           is_extraordinary?: boolean
           is_payment?: boolean
+          kind?: string | null
           merchant?: string | null
           native_currency: string
           needs_review?: boolean
+          paired_with?: string | null
           payment_type?: string | null
           source?: string
           statement_period?: string | null
+          status?: string
+          status_manual?: boolean
+          status_reason?: string | null
           tx_date: string
           user_id?: string
         }
@@ -599,6 +668,7 @@ export type Database = {
           country?: string
           created_at?: string
           description_raw?: string
+          duplicate_of?: string | null
           expense_type?: string
           external_ts?: string | null
           fx_rate_to_usd?: number
@@ -606,12 +676,17 @@ export type Database = {
           installments?: string | null
           is_extraordinary?: boolean
           is_payment?: boolean
+          kind?: string | null
           merchant?: string | null
           native_currency?: string
           needs_review?: boolean
+          paired_with?: string | null
           payment_type?: string | null
           source?: string
           statement_period?: string | null
+          status?: string
+          status_manual?: boolean
+          status_reason?: string | null
           tx_date?: string
           user_id?: string
         }
@@ -628,6 +703,20 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_duplicate_of_fkey"
+            columns: ["duplicate_of"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_paired_with_fkey"
+            columns: ["paired_with"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -667,6 +756,8 @@ export type Database = {
           budget_ceiling_usd: number | null
           created_at: string
           id: string
+          owner_keys: string[]
+          owner_names: string[]
           updated_at: string
           user_id: string
         }
@@ -674,6 +765,8 @@ export type Database = {
           budget_ceiling_usd?: number | null
           created_at?: string
           id?: string
+          owner_keys?: string[]
+          owner_names?: string[]
           updated_at?: string
           user_id: string
         }
@@ -681,6 +774,8 @@ export type Database = {
           budget_ceiling_usd?: number | null
           created_at?: string
           id?: string
+          owner_keys?: string[]
+          owner_names?: string[]
           updated_at?: string
           user_id?: string
         }

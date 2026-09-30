@@ -73,7 +73,13 @@ export type PipelineResult =
   | { status: "duplicate"; dedup_key: string }
   | { status: "no_parser"; package_name: string }
   | { status: "ignored"; reason: string }
-  | { status: "registered"; transaction_id: string; semaphore?: SemaphoreResult }
+  | {
+      status: "registered";
+      transaction_id: string;
+      /** Status the row ended with after reconciliation (active, duplicate, voided, internal_transfer). */
+      tx_status?: string;
+      semaphore?: SemaphoreResult;
+    }
   | { status: "fx_pending"; dedup_key: string }
   | { status: "deduped_cross_source"; kept_key: string }
   | { status: "registration_failed"; error: string }

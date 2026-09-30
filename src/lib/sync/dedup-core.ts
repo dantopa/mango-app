@@ -106,6 +106,9 @@ export function quality(tx: {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Transaction statuses that never stand for a purchase (see src/lib/reconcile). */
+const NOT_A_PURCHASE = new Set(["voided", "internal_transfer"]);
+
 const CARD_LAST4_REGEX = /[*•]{1,2}(\d{4})\b/;
 
 /** Extract card_last4 from description_raw as fallback */
@@ -232,7 +235,7 @@ export async function resolveDuplicate(
     const query = (supabase as any)
       .from("transactions")
       .select(
-        "id, merchant, amount_native, native_currency, amount_usd, card_last4, tx_date, external_ts, description_raw"
+        "id, merchant, amount_native, native_currency, amount_usd, card_last4, tx_date, external_ts, description_raw, status"
       )
       .eq("user_id", userId)
       .gte("tx_date", dateFrom)
@@ -246,7 +249,13 @@ export async function resolveDuplicate(
       return { action: "insert" };
     }
 
-    allTxs = (rawTxs ?? []).map(
+    allTxs = (rawTxs ?? [])
+      // A released hold or an internal transfer is not a purchase: matching a
+      // new charge against it would drop the charge. Duplicates stay, since they
+      // are the same purchase as an active row.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((row: any) => !NOT_A_PURCHASE.has(row.status))
+      .map(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (row: any) => ({
         id: row.id as string,

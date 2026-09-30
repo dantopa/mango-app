@@ -256,7 +256,7 @@ export function TransactionsTable({
                       <CategorySelect
                         value={t.category?.id ?? NONE}
                         color={t.category?.color}
-                        name={t.category?.name}
+                        name={categoryLabel(t)}
                         categories={categories}
                         className="h-8"
                         onChange={(v) =>
@@ -374,7 +374,7 @@ function MobileTransactionRow({
         <CategorySelect
           value={t.category?.id ?? NONE}
           color={t.category?.color}
-          name={t.category?.name}
+          name={categoryLabel(t)}
           categories={categories}
           className="h-9 min-w-0 flex-1"
           onChange={(v) => onMutate(t.id, { category_id: v === NONE ? null : v })}
@@ -446,7 +446,7 @@ function DesktopTransactionRow({
           <CategorySelect
             value={t.category?.id ?? NONE}
             color={t.category?.color}
-            name={t.category?.name}
+            name={categoryLabel(t)}
             categories={categories}
             className="h-8"
             onChange={(v) =>
@@ -497,6 +497,14 @@ function DesktopTransactionRow({
       )}
     </div>
   );
+}
+
+/**
+ * An income has no spending category by design; saying so beats a bare
+ * "Sin categoría" that reads like a pending review.
+ */
+function categoryLabel(t: TransactionWithRelations): string | undefined {
+  return t.category?.name ?? (t.kind === "income" ? "Ingreso" : undefined);
 }
 
 function CategorySelect({

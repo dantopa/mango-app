@@ -9,6 +9,9 @@ import { recategorizeMonth } from "@/lib/sync/sync-engine";
 import { GmailAuthError } from "@/lib/sync/gmail/client";
 import type { GmailSyncCursor } from "@/lib/sync/gmail/types";
 import type { SyncSourceResult } from "@/lib/sync/types";
+import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
+import { epochToLocalDate, TZ_OFFSETS } from "@/lib/push-ingest/dates";
+import { reconcileRange, shiftDate } from "@/lib/reconcile/run";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
@@ -84,11 +87,29 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 4. Return summary
+  // 4. Reconcile the last week: Gmail may have just brought in a purchase the
+  // push pipeline already registered, and any race the per-insert pass missed
+  // is settled here.
+  let reconciled = 0;
+  try {
+    const today = epochToLocalDate(Date.now(), TZ_OFFSETS.BOGOTA);
+    const report = await reconcileRange(getSupabaseAdmin(), OWNER_USER_ID, {
+      from: shiftDate(today, -6),
+      to: today,
+      trigger: "job",
+    });
+    reconciled = report.changes.length;
+    for (const e of report.errors) errors.push({ source: "reconcile", error: e });
+  } catch (err) {
+    errors.push({ source: "reconcile", error: err instanceof Error ? err.message : "Unknown error" });
+  }
+
+  // 5. Return summary
   return NextResponse.json({
     month,
     results,
     errors,
+    reconciled,
     total_inserted: results.reduce((sum, r) => sum + r.inserted, 0),
     total_duplicates: results.reduce((sum, r) => sum + r.duplicates, 0),
   });

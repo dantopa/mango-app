@@ -7,6 +7,7 @@ import { categorizeWithAi } from "@/lib/push-ingest/ai-categorizer";
 import { classifyTransaction } from "@/lib/push-ingest/classifier";
 import { resolveAccount, type AccountCandidate } from "@/lib/push-ingest/account-resolver";
 import type { ParsedTransaction } from "@/lib/push-ingest/types";
+import { reconcileAround } from "@/lib/reconcile/run";
 
 const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
@@ -155,6 +156,14 @@ export async function POST(request: Request): Promise<NextResponse> {
   }).eq("dedup_key", dedup_key);
   if (registeredError) {
     console.error(`[push-ingest][confirm] registered update failed for ${dedup_key}:`, registeredError.message);
+  }
+
+  // Same as a live ingest: the confirmed purchase may be a second notice of one
+  // already stored, or a transfer between the owner's own accounts.
+  try {
+    await reconcileAround(admin, OWNER_USER_ID, parsed.tx_date);
+  } catch (e) {
+    console.error("[push-ingest][confirm][reconcile] error:", e instanceof Error ? e.message : e);
   }
 
   return NextResponse.json({ status: "approved", transaction_id: txData.id });

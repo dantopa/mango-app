@@ -178,9 +178,18 @@ export function accountBalances(
 // Spending
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether a row counts at all. Duplicates, released pre-authorizations and
+ * transfers between the owner's own accounts are kept for audit but never
+ * counted (see src/lib/reconcile). Rows without a status predate it.
+ */
+export function isCounted(t: Pick<TransactionWithRelations, "status">): boolean {
+  return (t.status ?? "active") === "active";
+}
+
 /** A real expense: positive amount and not a payment/refund. */
 export function isExpense(t: TransactionWithRelations): boolean {
-  return !t.is_payment && t.amount_usd > 0;
+  return isCounted(t) && !t.is_payment && t.amount_usd > 0;
 }
 
 /**
@@ -188,7 +197,7 @@ export function isExpense(t: TransactionWithRelations): boolean {
  * card payments are also negative but carry `is_payment`, so they stay out.
  */
 export function isIncome(t: TransactionWithRelations): boolean {
-  return !t.is_payment && t.amount_usd < 0;
+  return isCounted(t) && !t.is_payment && t.amount_usd < 0;
 }
 
 /** Total income, as a positive number. */
