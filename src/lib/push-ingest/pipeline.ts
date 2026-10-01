@@ -24,6 +24,7 @@ import "./parsers"; // side-effect: registers all parsers
 
 const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
 import { OWNER_USER_ID } from "../owner";
+import { checkSms } from "./sms-gate";
 
 /** Postgres unique_violation — the dedup key was already claimed. */
 const PG_UNIQUE_VIOLATION = "23505";
@@ -185,6 +186,11 @@ export async function executePipeline(
 ): Promise<PipelineResult> {
   // If log_only, we shouldn't even be here (caller handles), but just in case:
   if (mode === "log_only") return { status: "logged" };
+
+  // Same gate as the webhook, for replays of raw logs stored before it existed:
+  // nothing is claimed or logged, so a private SMS leaves no new trace.
+  const sms = checkSms(payload.packageName, payload.title, payload.text);
+  if (!sms.ok) return { status: "ignored", reason: sms.reason };
 
   const supabase = getSupabaseAdmin();
   const loadAccounts = accountLoader(supabase, OWNER_USER_ID);

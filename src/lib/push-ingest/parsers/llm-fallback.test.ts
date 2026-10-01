@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { applyTemplate, tryTemplateParser, llmFallbackParser, type ParserTemplate } from "./llm-fallback";
+import {
+  applyTemplate,
+  isSpecificIgnorePattern,
+  llmFallbackParser,
+  reportsMoneyMoved,
+  tryTemplateParser,
+  type ParserTemplate,
+} from "./llm-fallback";
 import { isWhitelistedPackage } from "../package-whitelist";
 import type { AccountCandidate } from "../account-resolver";
 import type { PushPayload } from "../types";
@@ -70,6 +77,13 @@ const rappiPayload: PushPayload = {
   timestamp: Date.now(),
 };
 
+const deliveryPayload: PushPayload = {
+  ...rappiPayload,
+  text: "Tu pedido de EXITO va en camino",
+};
+
+const DELIVERY_IGNORE = "^Tu pedido de .+ va en camino$";
+
 describe("isWhitelistedPackage (shared PACKAGE_WHITELIST)", () => {
   it("returns true for known financial packages", () => {
     expect(isWhitelistedPackage("com.grability.rappi")).toBe(true);
@@ -139,10 +153,39 @@ describe("applyTemplate", () => {
 
   it("returns ignore for an outcome=ignore template without needing an amount", () => {
     const result = applyTemplate(
-      template({ outcome: "ignore", text_pattern: "compra en" }),
-      rappiPayload,
+      template({ outcome: "ignore", text_pattern: DELIVERY_IGNORE }),
+      deliveryPayload,
     );
     expect(result.kind).toBe("ignore");
+  });
+
+  it("never lets an ignore template swallow a purchase", () => {
+    const result = applyTemplate(
+      template({ outcome: "ignore", text_pattern: "^Tu compra en .+ fue exitosa$" }),
+      rappiPayload,
+    );
+    expect(result.kind).toBe("no_match");
+  });
+
+  it("never lets an ignore template swallow a refund (learned Wallet template)", () => {
+    const result = applyTemplate(
+      template({
+        outcome: "ignore",
+        text_pattern:
+          "^Se ha reembolsado en la tarjeta Nexo Mastercard ••(?<card>\\d{4}) el siguiente importe: (?<amount>-?\\d{1,3}(?:\\.\\d{3})* COP)$",
+      }),
+      {
+        ...rappiPayload,
+        packageName: "com.google.android.apps.walletnfcrel",
+        text: "Se ha reembolsado en la tarjeta Nexo Mastercard ••4186 el siguiente importe: -11.475 COP",
+      },
+    );
+    expect(result.kind).toBe("no_match");
+  });
+
+  it("does not apply a stored ignore template too vague to name its format", () => {
+    const result = applyTemplate(template({ outcome: "ignore", text_pattern: "^(.+)$" }), deliveryPayload);
+    expect(result.kind).toBe("no_match");
   });
 
   it("does not match when the title pattern fails", () => {
@@ -201,9 +244,15 @@ describe("tryTemplateParser", () => {
   });
 
   it("honours an ignore template", async () => {
-    reset({ push_parser_templates: [template({ outcome: "ignore", text_pattern: "compra en" })] });
-    const result = await tryTemplateParser(rappiPayload, "u1");
+    reset({ push_parser_templates: [template({ outcome: "ignore", text_pattern: DELIVERY_IGNORE })] });
+    const result = await tryTemplateParser(deliveryPayload, "u1");
     expect(result.kind).toBe("ignore");
+  });
+
+  it("escalates a purchase an old ignore template would have swallowed", async () => {
+    reset({ push_parser_templates: [template({ outcome: "ignore", text_pattern: "compra en EXITO por" })] });
+    const result = await tryTemplateParser(rappiPayload, "u1");
+    expect(result.kind).toBe("unknown");
   });
 });
 
@@ -301,19 +350,46 @@ describe("llmFallbackParser", () => {
   });
 
   it("stores an ignore template for a non-transactional notification", async () => {
+    const promo = { ...payload, text: "Recibe 2x1 en cines este fin de semana con Nequi" };
     mockOpenAi(
       response({
         is_transaction: false,
-        reason: "declined purchase",
+        reason: "promotion",
         amount_text: null,
-        text_regex: "Pagaste",
+        text_regex: "^Recibe 2x1 en cines este fin de semana con Nequi$",
+      }),
+    );
+    const result = await llmFallbackParser(promo, "u1", accounts);
+
+    expect(result).toEqual({ kind: "ignore", reason: "promotion" });
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].row).toMatchObject({ outcome: "ignore" });
+  });
+
+  it("refuses to ignore a payment and leaves it visible as unparsed", async () => {
+    mockOpenAi(
+      response({
+        is_transaction: false,
+        reason: "looks like a promo",
+        amount_text: null,
+        text_regex: "^Pagaste \\$[\\d.]+ en .+$",
       }),
     );
     const result = await llmFallbackParser(payload, "u1", accounts);
 
-    expect(result).toEqual({ kind: "ignore", reason: "declined purchase" });
-    expect(inserted).toHaveLength(1);
-    expect(inserted[0].row).toMatchObject({ outcome: "ignore" });
+    expect(result.kind).toBe("unknown");
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("does not store an ignore template too vague to name its format", async () => {
+    const promo = { ...payload, text: "Recibe 2x1 en cines" };
+    mockOpenAi(
+      response({ is_transaction: false, reason: "promotion", amount_text: null, text_regex: "^(.+)$" }),
+    );
+    const result = await llmFallbackParser(promo, "u1", accounts);
+
+    expect(result.kind).toBe("ignore");
+    expect(inserted).toHaveLength(0);
   });
 
   it("registers a refund as a negative amount", async () => {
@@ -363,5 +439,38 @@ describe("llmFallbackParser", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network error"));
     const result = await llmFallbackParser(payload, "u1", accounts);
     expect(result.kind).toBe("unknown");
+  });
+});
+
+describe("ignore guards", () => {
+  it.each([
+    "Bancolombia: Compraste $25.000 en EXITO con tu T.Deb *1234",
+    "Tu compra en EXITO por $ 33.300 fue exitosa",
+    "Se reembolsó un importe de -COP124,414.00 en TARJETA NEGRA RAPPICARD CO ••3679",
+    "Bancolombia: Transferiste $50.000 desde tu cuenta *1234",
+    "Reembolso de € 43.78(50.00 USD) de WWW.BEDSNDRINKS.COM.",
+  ])("reports money moved: %s", (text) => {
+    expect(reportsMoneyMoved(text)).toBe(true);
+  });
+
+  it.each([
+    "Compra rechazada en AMAZON por US$ 20,00",
+    "Tu pedido de EXITO va en camino",
+    "Puntos Cencosud: Recibe 70.000 Puntos Extra por compras desde $200.000 en Jumbo.",
+    "NEXO está en $1.23, +4.5% en las últimas 24 h. Tocá para ver otros movimientos.",
+  ])("does not report money moved: %s", (text) => {
+    expect(reportsMoneyMoved(text)).toBe(false);
+  });
+
+  it("measures how specific an ignore pattern is", () => {
+    expect(isSpecificIgnorePattern("^(.+)$")).toBe(false);
+    expect(isSpecificIgnorePattern("\\$[\\d.,]+")).toBe(false);
+    expect(isSpecificIgnorePattern("(?<amount>[0-9]+) USDT")).toBe(false);
+    expect(isSpecificIgnorePattern(DELIVERY_IGNORE)).toBe(true);
+    expect(
+      isSpecificIgnorePattern(
+        "^NEXO está en (?<amount>\\$[0-9]+\\.[0-9]+), \\+[0-9]+\\.[0-9]+% en las últimas [0-9]+ h\\. Tocá para ver otros movimientos\\.$",
+      ),
+    ).toBe(true);
   });
 });

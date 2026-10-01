@@ -4,6 +4,7 @@ import { validateIngestAuth } from "@/lib/push-ingest/auth";
 import { isWhitelistedPackage } from "@/lib/push-ingest/package-whitelist";
 import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
+import { checkSms } from "@/lib/push-ingest/sms-gate";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 import type { Json } from "@/lib/supabase/database.types";
@@ -49,6 +50,13 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (!isWhitelistedPackage(packageName)) {
       return NextResponse.json({ status: "ignored", package_name: packageName });
+    }
+
+    // SMS from senders that are not banks, or carrying a one-time code, are
+    // dropped before anything is stored: they are private, not expenses.
+    const sms = checkSms(packageName, String(rawPayload.title ?? ""), String(rawPayload.text ?? ""));
+    if (!sms.ok) {
+      return NextResponse.json({ status: "ignored", reason: sms.reason });
     }
 
     // 6. Save raw log (so we never lose a whitelisted notification)
