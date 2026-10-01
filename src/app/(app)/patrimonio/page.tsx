@@ -12,7 +12,6 @@ import { formatDate, formatNative, formatPercent, formatUsd } from "@/lib/format
 import { PageHeader } from "@/components/page-header";
 import { ChangeIndicator } from "@/components/change-indicator";
 import { LoadingState, ErrorState, EmptyState } from "@/components/states";
-import { Sparkline } from "@/components/charts/sparkline";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -24,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { paletteColor } from "@/lib/colors";
+import { LazySparkline } from "@/components/lazy";
 import type { AccountType } from "@/lib/types";
 
 const TYPE_LABEL: Record<AccountType, string> = {
@@ -119,7 +119,7 @@ export default function PatrimonioPage() {
                     </div>
                   </div>
                 </div>
-                <Sparkline data={b.sparkline} color={paletteColor(i)} />
+                <LazySparkline data={b.sparkline} color={paletteColor(i)} />
                 {b.notes && (
                   <div className="text-xs text-muted-foreground">{b.notes}</div>
                 )}
@@ -166,7 +166,7 @@ export default function PatrimonioPage() {
                       <Badge variant="secondary">{TYPE_LABEL[b.account.type]}</Badge>
                     </TableCell>
                     <TableCell className="w-32">
-                      <Sparkline data={b.sparkline} color={paletteColor(i)} />
+                      <LazySparkline data={b.sparkline} color={paletteColor(i)} />
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground tabular-nums">
                       {formatNative(b.balanceNative, b.nativeCurrency)}

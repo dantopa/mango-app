@@ -16,6 +16,7 @@ import type { Database } from "../supabase/database.types";
 import { reconcile } from "./reconcile";
 import type { OwnerIdentity } from "./owner";
 import type { ReconcileRow, StatusChange, ReviewFlag, TxStatus } from "./types";
+import { shiftDate } from "../push-ingest/dates";
 
 type Client = SupabaseClient<Database>;
 
@@ -48,11 +49,7 @@ export type ReconcileReport = {
   errors: string[];
 };
 
-export function shiftDate(date: string, days: number): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+export { shiftDate };
 
 export async function loadOwnerIdentity(supabase: Client, userId: string): Promise<OwnerIdentity> {
   const { data, error } = await supabase

@@ -6,6 +6,11 @@ const withBundleAnalyzer = bundleAnalyzer({
 });
 
 const nextConfig: NextConfig = {
+  env: {
+    // Busts the persisted query cache on every deploy, so a cache written by an
+    // older build (with older row shapes) is never restored into a newer one.
+    NEXT_PUBLIC_BUILD_ID: process.env.VERCEL_GIT_COMMIT_SHA ?? "",
+  },
   experimental: {
     optimizePackageImports: ["lucide-react", "recharts", "date-fns"],
   },

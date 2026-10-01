@@ -78,3 +78,10 @@ export function bogotaMonthBounds(month: string): { from: string; to: string } {
   const to = Date.UTC(y, m, 1) + offset - 1;
   return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
 }
+
+/** Calendar arithmetic on a "YYYY-MM-DD" date (noon UTC, so no DST edge). */
+export function shiftDate(date: string, days: number): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}

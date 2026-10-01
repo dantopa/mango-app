@@ -1,8 +1,9 @@
+import type { PersistedClient, Persister } from "@tanstack/react-query-persist-client";
+
 /**
  * IndexedDB-backed storage adapter for TanStack Query persistence.
  *
- * Implements the Storage-like interface expected by
- * @tanstack/query-sync-storage-persister, backed by the
+ * Backs the TanStack Query persister (`createIDBPersister`) with the
  * `maquinita-query-cache` IndexedDB database.
  *
  * Gracefully degrades to noop when IndexedDB is unavailable
@@ -13,7 +14,18 @@ const DB_NAME = "maquinita-query-cache";
 const STORE_NAME = "queries";
 const DB_VERSION = 1;
 
+let dbPromise: Promise<IDBDatabase | null> | null = null;
+
+/** One connection per page; reopening on every read and write was pure overhead. */
 function openDB(): Promise<IDBDatabase | null> {
+  dbPromise ??= openDBOnce().then((db) => {
+    if (!db) dbPromise = null; // let a later call retry
+    return db;
+  });
+  return dbPromise;
+}
+
+function openDBOnce(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
     if (typeof indexedDB === "undefined") {
       resolve(null);
@@ -115,55 +127,57 @@ export function createIDBStorageAdapter(): IDBStorageAdapter {
   };
 }
 
+/** Key the persisted cache lives under. */
+export const PERSIST_KEY = "tanstack-query-persist";
+
+/** How often a burst of cache changes is written at most. */
+const PERSIST_THROTTLE_MS = 1000;
+
 /**
- * Create a sync-compatible storage persister that wraps the async
- * IndexedDB adapter. The @tanstack/query-sync-storage-persister
- * expects a synchronous Storage-like interface, so we provide a
- * wrapper that works with its internal throttling.
+ * TanStack Query persister backed by IndexedDB.
+ *
+ * Async on purpose. The previous sync wrapper served reads from an in-memory
+ * map filled by an IndexedDB read in flight, so at startup the restore always
+ * found it empty; and it pre-loaded "tanstack-query-persist" while the sync
+ * persister reads "REACT_QUERY_OFFLINE_CACHE", so nothing persisted was ever
+ * restored. An async persister lets the provider wait for the real read.
  */
-export function createIDBSyncStorage(): {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
-  removeItem: (key: string) => void;
-} {
-  const adapter = createIDBStorageAdapter();
+export function createIDBPersister(
+  adapter: IDBStorageAdapter = createIDBStorageAdapter(),
+  key: string = PERSIST_KEY,
+): Persister {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pending: PersistedClient | null = null;
 
-  // In-memory cache to serve sync reads while IDB resolves
-  const cache = new Map<string, string>();
-
-  // Hydrate cache from IDB on first access
-  let hydrated = false;
-  const hydratePromise =
-    typeof window !== "undefined"
-      ? adapter.getItem("tanstack-query-persist").then((value) => {
-          if (value !== null) {
-            cache.set("tanstack-query-persist", value);
-          }
-          hydrated = true;
-        })
-      : Promise.resolve();
-
-  // Expose the hydration promise for external await
-  (globalThis as Record<string, unknown>).__queryPersistHydration =
-    hydratePromise;
+  const flush = () => {
+    timer = null;
+    const client = pending;
+    pending = null;
+    if (!client) return;
+    adapter.setItem(key, JSON.stringify(client)).catch(() => {
+      // Persisting is best effort: the next change tries again.
+    });
+  };
 
   return {
-    getItem(key: string): string | null {
-      return cache.get(key) ?? null;
+    persistClient(client) {
+      // Every query update triggers a persist; writing ~1 MB per update would
+      // block the main thread, so only the latest state of a burst is written.
+      pending = client;
+      timer ??= setTimeout(flush, PERSIST_THROTTLE_MS);
     },
-
-    setItem(key: string, value: string): void {
-      cache.set(key, value);
-      adapter.setItem(key, value).catch(() => {
-        // Silently fail — in-memory cache still holds the value
-      });
+    async restoreClient() {
+      const raw = await adapter.getItem(key);
+      if (raw === null) return undefined;
+      try {
+        return JSON.parse(raw) as PersistedClient;
+      } catch {
+        return undefined;
+      }
     },
-
-    removeItem(key: string): void {
-      cache.delete(key);
-      adapter.removeItem(key).catch(() => {
-        // Silently fail
-      });
+    async removeClient() {
+      pending = null;
+      await adapter.removeItem(key);
     },
   };
 }

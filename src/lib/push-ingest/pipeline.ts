@@ -10,7 +10,7 @@ import { checkAndAlert } from "./alert";
 import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
 import { resolveAccount, type AccountCandidate } from "./account-resolver";
-import { bogotaMonthInfo, epochToLocalDate, TZ_OFFSETS } from "./dates";
+import { bogotaMonthInfo, epochToLocalDate, shiftDate, TZ_OFFSETS } from "./dates";
 import { validateParsedTransaction, type ResolvedTransaction } from "./validate";
 import { resolveDuplicate } from "../sync/dedup-core";
 import type { DedupCandidate } from "../sync/dedup-core";
@@ -25,6 +25,13 @@ import "./parsers"; // side-effect: registers all parsers
 const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
 import { OWNER_USER_ID } from "../owner";
 import { checkSms } from "./sms-gate";
+
+/**
+ * How far before a purchase's date its notification may have been logged.
+ * Generous on purpose: a claim left out here can let a second notification of
+ * the same purchase through, while one too many only costs a few bytes.
+ */
+const CLAIM_LOOKBACK_DAYS = 3;
 
 /** Postgres unique_violation — the dedup key was already claimed. */
 const PG_UNIQUE_VIOLATION = "23505";
@@ -374,12 +381,16 @@ export async function executePipeline(
   // Get transaction IDs already claimed by the SAME package (multiplicity guard).
   // Only exclude same-source claims — cross-source claims must remain in the
   // candidate pool so Level 2 (merchant + amount + date) can detect them as dupes.
+  // Only claims near this date matter: resolveDuplicate looks at ±1 day around
+  // tx_date. Unbounded, this read grew with every notification ever registered
+  // and would start silently losing rows at PostgREST's 1000-row cap.
   const { data: claimedLogs } = await supabase
     .from("push_ingest_log")
     .select("transaction_id")
     .not("transaction_id", "is", null)
     .eq("user_id", OWNER_USER_ID)
-    .eq("package_name", payload.packageName);
+    .eq("package_name", payload.packageName)
+    .gte("created_at", `${shiftDate(resolved.tx_date, -CLAIM_LOOKBACK_DAYS)}T00:00:00Z`);
   const excludeClaimedTxIds = (claimedLogs ?? [])
     .map((l: { transaction_id: string | null }) => l.transaction_id)
     .filter((id: string | null): id is string => Boolean(id));
