@@ -2,10 +2,15 @@
 /**
  * inject-sw-version.mjs
  *
- * Post-build script that reads the Next.js BUILD_ID and injects it into
- * public/sw.js, replacing the __BUILD_ID__ and __PRECACHE_URLS__ placeholders.
+ * Injects a build version into public/sw.js, replacing the __BUILD_ID__ and
+ * __PRECACHE_URLS__ placeholders, so every deploy ships a byte-different SW
+ * (the browser only installs a new one then) with its own cache names.
  *
- * Run automatically via the `postbuild` npm script after `next build`.
+ * Runs as `prebuild`, not `postbuild`: on Vercel, `next build` already copies
+ * public/ into the output when it finishes, so a file changed afterwards is
+ * never deployed. The version is the commit being deployed
+ * (VERCEL_GIT_COMMIT_SHA), the same value that busts the persisted query
+ * cache; outside Vercel it falls back to the last Next BUILD_ID or a timestamp.
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -15,13 +20,10 @@ const ROOT = resolve(import.meta.dirname, "..");
 const BUILD_ID_PATH = join(ROOT, ".next", "BUILD_ID");
 const SW_PATH = join(ROOT, "public", "sw.js");
 
-// --- Read BUILD_ID ---
-if (!existsSync(BUILD_ID_PATH)) {
-  console.error("❌ .next/BUILD_ID not found. Run `next build` first.");
-  process.exit(1);
-}
-
-const buildId = readFileSync(BUILD_ID_PATH, "utf-8").trim();
+// --- Resolve the version ---
+const buildId =
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  (existsSync(BUILD_ID_PATH) ? readFileSync(BUILD_ID_PATH, "utf-8").trim() : `local-${Date.now()}`);
 console.log(`✔ BUILD_ID: ${buildId}`);
 
 // --- Resolve precache URLs ---

@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/inject-sw-version.mjs",
     "build": "next build",
-    "postbuild": "node scripts/inject-sw-version.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest --run",
