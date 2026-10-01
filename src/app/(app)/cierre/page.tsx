@@ -39,9 +39,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { MonthlyCloseItem, MonthlyCloseWithItems } from "@/lib/types";
+import { currentBogotaMonth } from "@/lib/push-ingest/dates";
 
+/** Bogotá month: `toISOString()` is UTC, which from 19:00 on the last day is already next month. */
 function currentPeriod(): string {
-  return new Date().toISOString().slice(0, 7);
+  return currentBogotaMonth();
 }
 
 const ITEM_META: Record<string, { icon: React.ElementType; help: string }> = {

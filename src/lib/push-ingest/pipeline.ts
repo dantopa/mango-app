@@ -10,7 +10,7 @@ import { checkAndAlert } from "./alert";
 import { sendPushNotification } from "./web-push";
 import { getSupabaseAdmin } from "./supabase-admin";
 import { resolveAccount, type AccountCandidate } from "./account-resolver";
-import { epochToLocalDate, TZ_OFFSETS } from "./dates";
+import { bogotaMonthInfo, epochToLocalDate, TZ_OFFSETS } from "./dates";
 import { validateParsedTransaction, type ResolvedTransaction } from "./validate";
 import { resolveDuplicate } from "../sync/dedup-core";
 import type { DedupCandidate } from "../sync/dedup-core";
@@ -21,9 +21,9 @@ import { loadOwnerIdentity, reconcileAround } from "../reconcile/run";
 import type { TxStatus } from "../reconcile/types";
 import "./parsers"; // side-effect: registers all parsers
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
+import { OWNER_USER_ID } from "../owner";
 
 /** Postgres unique_violation — the dedup key was already claimed. */
 const PG_UNIQUE_VIOLATION = "23505";
@@ -511,14 +511,19 @@ export async function executePipeline(
     return { status: "registered", transaction_id: txData.id, tx_status: txStatus };
   }
 
+  // A replay of old notifications (maxPastDays set) or a purchase dated in
+  // another month says nothing about this month's budget, and a push for each
+  // replayed expense would be noise.
+  if (options.maxPastDays !== undefined || resolved.tx_date.slice(0, 7) !== bogotaMonthInfo().month) {
+    return { status: "registered", transaction_id: txData.id, tx_status: txStatus };
+  }
+
   // 14. Evaluate semaphore and alert if state changed
   let semaphoreResult = undefined;
   try {
-    const now = new Date();
-    const currentDay = now.getDate();
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-    const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+    // Bogotá month: Vercel runs in UTC, so on the last day after 19:00 `new Date()`
+    // is next month and the semaphore summed an empty month.
+    const { day: currentDay, daysInMonth, start: monthStart, end: monthEnd } = bogotaMonthInfo();
 
     // Sum all expenses this month (exclude payments only)
     const { data: monthTxns } = await supabase

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isOwner } from "@/lib/owner";
 
 import { createClient } from "@/lib/supabase/server";
 import { getRefreshToken } from "@/lib/sync/gmail/token-store";
@@ -20,6 +21,9 @@ export async function GET() {
       { error: "No autenticado" },
       { status: 401 },
     );
+  }
+  if (!isOwner(user.id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const token = await getRefreshToken();

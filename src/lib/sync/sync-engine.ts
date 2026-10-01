@@ -323,6 +323,11 @@ export async function recategorizeMonth(
     .select("id, merchant, description_raw, is_payment")
     .eq("user_id", userId)
     .eq("is_payment", false)
+    // Only outgoing money: a matching rule on an incoming transfer ("Transferencia
+    // de EMPRESA") would turn income into a card payment and drop it from income.
+    // The insert paths skip classification for income for the same reason.
+    .gt("amount_native", 0)
+    .eq("status", "active")
     .gte("tx_date", monthStart)
     .lte("tx_date", monthEnd);
 

@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "../../push-ingest/supabase-admin";
+import { OWNER_USER_ID } from "../../owner";
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * Mark the monthly close item for a gmail sub-source as "cargado".

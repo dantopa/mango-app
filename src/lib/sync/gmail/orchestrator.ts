@@ -9,8 +9,8 @@ import { GmailAuthError } from "./client";
 import { markCloseItem } from "./close-items";
 import { learnFromEmail, tryLearnedTemplates } from "./learned-parser";
 import { GMAIL_SOURCES } from "./sources";
+import { OWNER_USER_ID } from "../../owner";
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * Compute idempotency key for a Gmail message.

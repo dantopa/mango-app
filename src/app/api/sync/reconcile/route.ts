@@ -5,10 +5,10 @@ import { validateBearer } from "@/lib/push-ingest/auth";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 import { epochToLocalDate, TZ_OFFSETS } from "@/lib/push-ingest/dates";
 import { reconcileRange, shiftDate } from "@/lib/reconcile/run";
+import { OWNER_USER_ID } from "@/lib/owner";
 
 export const maxDuration = 60;
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /** Default look-back: notifications race each other within minutes, releases within days. */
 const DEFAULT_DAYS = 7;

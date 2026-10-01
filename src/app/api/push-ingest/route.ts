@@ -7,8 +7,8 @@ import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { pushPayloadSchema } from "@/lib/push-ingest/schemas";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 import type { Json } from "@/lib/supabase/database.types";
+import { OWNER_USER_ID } from "@/lib/owner";
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {

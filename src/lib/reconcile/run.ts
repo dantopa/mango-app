@@ -234,3 +234,30 @@ export async function reconcileAround(
     trigger: "ingest",
   });
 }
+
+/**
+ * Reconciles a whole "YYYY-MM" month after a batch load (a bank sync, an email
+ * sync). Best effort: a failure is logged, never thrown — the load itself
+ * already succeeded, and the daily job will reconcile again.
+ */
+export async function reconcileMonthAfterLoad(
+  supabase: Client,
+  userId: string,
+  month: string,
+  source: string,
+): Promise<void> {
+  const [y, m] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  try {
+    const report = await reconcileRange(supabase, userId, {
+      from: `${month}-01`,
+      to: `${month}-${String(lastDay).padStart(2, "0")}`,
+      trigger: "job",
+    });
+    if (report.changes.length > 0) {
+      console.log(`[${source}] reconciled ${month}: ${report.changes.length} status changes`);
+    }
+  } catch (err) {
+    console.error(`[${source}] reconcile failed for ${month}:`, err instanceof Error ? err.message : err);
+  }
+}

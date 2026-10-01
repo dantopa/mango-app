@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isOwner } from "@/lib/owner";
 import type { NextRequest } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
@@ -6,6 +7,8 @@ import { callMcpTool, McpError } from "@/lib/sync/mcp-client";
 import { adaptBbva } from "@/lib/sync/adapters/bbva";
 import { processCandidates, recategorizeMonth } from "@/lib/sync/sync-engine";
 import type { SyncRequest, SyncErrorResponse, SyncSourceResult } from "@/lib/sync/types";
+import { reconcileMonthAfterLoad } from "@/lib/reconcile/run";
+import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 
 export const maxDuration = 60;
 
@@ -34,6 +37,9 @@ export async function POST(request: NextRequest) {
         { error: "No autenticado", code: "AUTH_EXPIRED" } satisfies SyncErrorResponse,
         { status: 401 }
       );
+    }
+    if (!isOwner(user.id)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
     // 2. Parse request body
@@ -89,6 +95,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 5. Re-categorize & re-classify
+    await reconcileMonthAfterLoad(getSupabaseAdmin(), user.id, month, "sync/bbva");
     const recat = await recategorizeMonth(user.id, month);
     if (recat.updated > 0 || recat.classified > 0) {
       console.log(
