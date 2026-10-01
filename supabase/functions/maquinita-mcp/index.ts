@@ -6,7 +6,8 @@
 // contract (owner user_id, USD snapshot, expense sign, snapshot upsert).
 //
 // Transport: MCP Streamable HTTP (JSON-RPC 2.0 over a single POST endpoint).
-// Auth:      simple shared secret (header `x-maquinita-key` or `?key=` query),
+// Auth:      shared secret in `x-maquinita-key`, `Authorization: Bearer`, or the
+//            `?key=` query (kept for connectors that can only set a URL),
 //            single-owner model — every write is stamped with OWNER_USER_ID.
 // Access:    uses the service-role key (auto-injected by Supabase) so it can
 //            write rows for the owner regardless of RLS.
@@ -25,7 +26,7 @@ const OWNER_USER_ID =
 // public credential. No secret set → every request is rejected.
 const SECRET = Deno.env.get("MAQUINITA_MCP_SECRET") ?? "";
 
-const SERVER_INFO = { name: "maquinita-mcp", version: "1.4.0" };
+const SERVER_INFO = { name: "maquinita-mcp", version: "1.4.1" };
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 const supabase = createClient(
@@ -39,6 +40,25 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "content-type, authorization, x-maquinita-key, mcp-protocol-version",
 };
+
+/**
+ * Constant-time secret check. Both sides are hashed first so the comparison
+ * always runs over 32 bytes: `!==` stops at the first differing character,
+ * which leaks how much of a guess is right, and comparing raw strings leaks
+ * the secret's length.
+ */
+async function secretMatches(candidate: string, secret: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(candidate)),
+    crypto.subtle.digest("SHA-256", enc.encode(secret)),
+  ]);
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
 
 // --- Domain helpers ----------------------------------------------------------
 
@@ -1005,8 +1025,16 @@ Deno.serve(async (req) => {
     return json(rpcError(null, -32001, "No autorizado: servidor sin secret configurado"), 401);
   }
   const url = new URL(req.url);
-  const key = req.headers.get("x-maquinita-key") ?? url.searchParams.get("key");
-  if (key !== SECRET) {
+  // Any of the three may carry it. A client can send an unrelated
+  // `Authorization` (a Supabase anon JWT) next to the real key, so the first
+  // one present is not enough.
+  const candidates = [
+    req.headers.get("x-maquinita-key"),
+    req.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null,
+    url.searchParams.get("key"),
+  ].filter((k): k is string => k !== null && k !== "");
+  const matches = await Promise.all(candidates.map((k) => secretMatches(k, SECRET)));
+  if (!matches.includes(true)) {
     return json(rpcError(null, -32001, "No autorizado: secret inválido"), 401);
   }
 

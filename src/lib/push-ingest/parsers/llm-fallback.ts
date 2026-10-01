@@ -45,6 +45,47 @@ const RE_NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)\s*[+*]/;
 const RE_HAS_AMOUNT_GROUP = /\(\?<amount>/;
 
 /**
+ * Words of money that already moved: a purchase, a payment, a refund. An
+ * `ignore` answer for such a text is never trusted, because an ignore template
+ * is silent — it would swallow every future notification it matches without a
+ * trace. Two such templates were learned for Google Wallet refunds; the
+ * deterministic parser runs first today, but one regression away they would
+ * have dropped every refund.
+ */
+const RE_MONEY_MOVED =
+  /reembols|devoluci|refund|reintegr|compraste|tu compra|pagaste|transferiste|retiraste|\bcargo\b|\bcobro\b/i;
+
+/** ...unless the text says the movement did not happen. */
+const RE_NOT_COMPLETED = /rechaz|declin|no (?:fue|pudo|se pudo)|fallid/i;
+
+/**
+ * An ignore pattern has to name its format: at least this many literal
+ * letters once character classes, groups and quantifiers are stripped. A
+ * pattern like `^(.+)$` or `\$[\d.,]+` would ignore anything.
+ */
+const MIN_IGNORE_LITERAL_LETTERS = 12;
+
+/** True when the text reports money that moved, so it must not be ignored. */
+export function reportsMoneyMoved(text: string): boolean {
+  return RE_MONEY_MOVED.test(text) && !RE_NOT_COMPLETED.test(text);
+}
+
+/** Letters a pattern matches literally; a rough measure of how specific it is. */
+export function literalLetterCount(pattern: string): number {
+  const literal = pattern
+    .replace(/\(\?<[A-Za-z_]\w*>|\(\?[:=!]/g, "") // group openers
+    .replace(/\[(?:\\.|[^\]])*\]/g, "") // character classes
+    .replace(/\\[dDsSwWbBpP](?:\{[^}]*\})?/g, "") // escapes for classes
+    .replace(/\{\d+(?:,\d*)?\}/g, ""); // counted quantifiers
+  return (literal.match(/\p{L}/gu) ?? []).length;
+}
+
+/** Whether an ignore pattern is specific enough to be trusted to stay silent. */
+export function isSpecificIgnorePattern(pattern: string): boolean {
+  return literalLetterCount(pattern) >= MIN_IGNORE_LITERAL_LETTERS;
+}
+
+/**
  * Pre-filter: some financial packages send tons of marketing/delivery spam.
  * If the deterministic parser already rejected this notification, check if
  * it's actually spam before sending to the expensive LLM fallback.
@@ -118,6 +159,11 @@ export function applyTemplate(template: ParserTemplate, payload: PushPayload): T
   if (!match) return { kind: "no_match" };
 
   if (template.outcome === "ignore") {
+    // Checked on every use, not only when saving, so templates learned before
+    // this rule cannot swallow a refund or a vague match either.
+    if (reportsMoneyMoved(payload.text) || !isSpecificIgnorePattern(template.text_pattern)) {
+      return { kind: "no_match" };
+    }
     return { kind: "ignore", reason: `learned template ${template.id}` };
   }
 
@@ -328,6 +374,12 @@ export async function llmFallbackParser(
   }
 
   if (!extraction.is_transaction) {
+    // A purchase, payment or refund the model wants to drop stays visible as
+    // unparsed (status no_parser) instead of disappearing as "ignored".
+    if (reportsMoneyMoved(payload.text)) {
+      console.log(`[llm-fallback] refusing ignore for a money movement in ${payload.packageName}: ${extraction.reason}`);
+      return { kind: "unknown" };
+    }
     await saveTemplate(payload, userId, extraction, { outcome: "ignore" });
     return { kind: "ignore", reason: extraction.reason || "classified as non-transactional by AI" };
   }
@@ -432,6 +484,10 @@ async function saveTemplate(
   }
   if (compilePattern(pattern) === null) {
     console.log(`[llm-fallback] rejecting unsafe or invalid pattern: ${pattern}`);
+    return;
+  }
+  if (target.outcome === "ignore" && !isSpecificIgnorePattern(pattern)) {
+    console.log(`[llm-fallback] rejecting ignore pattern too vague to stay silent: ${pattern}`);
     return;
   }
 
