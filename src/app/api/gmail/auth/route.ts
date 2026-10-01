@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isOwner } from "@/lib/owner";
 import { cookies } from "next/headers";
 import { randomBytes } from "crypto";
 
@@ -20,6 +21,9 @@ export async function GET(request: Request) {
 
   if (!user) {
     return NextResponse.redirect(`${origin}/login`);
+  }
+  if (!isOwner(user.id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   // Generate random state for CSRF protection

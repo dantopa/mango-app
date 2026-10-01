@@ -49,3 +49,32 @@ export function resolveTxDate(
       : Date.now();
   return epochToLocalDate(epochMs, offsetHours);
 }
+
+/** "YYYY-MM" of the current month in Bogotá. On Vercel the clock is UTC, so from 19:00 Bogotá `new Date()` is already tomorrow — and on the last day of a month, next month. */
+export function currentBogotaMonth(nowMs: number = Date.now()): string {
+  return epochToLocalDate(nowMs, TZ_OFFSETS.BOGOTA).slice(0, 7);
+}
+
+/** Today in Bogotá: day of month, days in the month and the month's first/last date (YYYY-MM-DD). */
+export function bogotaMonthInfo(nowMs: number = Date.now()): {
+  month: string;
+  day: number;
+  daysInMonth: number;
+  start: string;
+  end: string;
+} {
+  const today = epochToLocalDate(nowMs, TZ_OFFSETS.BOGOTA);
+  const [y, m, d] = today.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const month = today.slice(0, 7);
+  return { month, day: d, daysInMonth, start: `${month}-01`, end: `${month}-${String(daysInMonth).padStart(2, "0")}` };
+}
+
+/** The instants a Bogotá calendar month starts and ends, as UTC ISO strings (for timestamp columns). */
+export function bogotaMonthBounds(month: string): { from: string; to: string } {
+  const [y, m] = month.split("-").map(Number);
+  const offset = TZ_OFFSETS.BOGOTA * 3600_000;
+  const from = Date.UTC(y, m - 1, 1) + offset;
+  const to = Date.UTC(y, m, 1) + offset - 1;
+  return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
+}

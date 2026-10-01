@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isOwner } from "@/lib/owner";
 import type { NextRequest } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
@@ -6,6 +7,8 @@ import { callMcpTool, McpError } from "@/lib/sync/mcp-client";
 import { adaptBancolombia } from "@/lib/sync/adapters/bancolombia";
 import { processCandidates, recategorizeMonth } from "@/lib/sync/sync-engine";
 import type { SyncRequest, SyncErrorResponse } from "@/lib/sync/types";
+import { reconcileMonthAfterLoad } from "@/lib/reconcile/run";
+import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 
 /**
  * POST /api/sync/bancolombia
@@ -32,6 +35,9 @@ export async function POST(request: NextRequest) {
         { error: "No autenticado", code: "AUTH_EXPIRED" } satisfies SyncErrorResponse,
         { status: 401 }
       );
+    }
+    if (!isOwner(user.id)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
     // 2. Parse request body
@@ -82,6 +88,7 @@ export async function POST(request: NextRequest) {
     const result = await processCandidates(candidates, user.id, month);
 
     // 6. Re-categorize & re-classify any uncategorized transactions from this month
+    await reconcileMonthAfterLoad(getSupabaseAdmin(), user.id, month, "sync/bancolombia");
     const recat = await recategorizeMonth(user.id, month);
     if (recat.updated > 0 || recat.classified > 0) {
       console.log(`[sync/bancolombia] recategorized: ${recat.updated} updated, ${recat.classified} reclassified`);

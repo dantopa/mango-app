@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isOwner } from "@/lib/owner";
 import type { NextRequest } from "next/server";
 
 export const maxDuration = 60;
@@ -10,6 +11,8 @@ import { GmailAuthError, GmailApiError } from "@/lib/sync/gmail/client";
 import { ERROR_MESSAGES } from "@/lib/sync/types";
 import type { SyncErrorResponse } from "@/lib/sync/types";
 import type { GmailSourceId, GmailSyncCursor } from "@/lib/sync/gmail/types";
+import { reconcileMonthAfterLoad } from "@/lib/reconcile/run";
+import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 
 /**
  * POST /api/sync/gmail
@@ -36,6 +39,9 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+    if (!isOwner(user.id)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
 
     // 2. Parse and validate request body
     const body = await request.json();
@@ -59,6 +65,7 @@ export async function POST(request: NextRequest) {
     //    this route is resumed by the client with `next`, and the mop-up pass has
     //    nothing to mop up until the last page is in.
     if (!next) {
+      await reconcileMonthAfterLoad(getSupabaseAdmin(), user.id, month, "sync/gmail");
       const recat = await recategorizeMonth(user.id, month);
       if (recat.updated > 0 || recat.classified > 0) {
         console.log(`[sync/gmail] recategorized: ${recat.updated} updated, ${recat.classified} reclassified`);

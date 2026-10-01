@@ -51,7 +51,12 @@ export async function classifyTransaction(
   const { data: rules, error } = await supabase
     .from("transfer_classification_rules")
     .select("id, pattern, match_type, list_type")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    // Deterministic precedence: a denylist rule ("this is a real expense") wins
+    // over an allowlist one when both match. Without an order the winner
+    // depended on whatever order Postgres returned the rows in.
+    .order("list_type", { ascending: false })
+    .order("id");
 
   if (error || !rules) {
     console.error("[classifier] query error:", error?.message);

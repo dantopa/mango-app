@@ -25,7 +25,7 @@ const OWNER_USER_ID =
 // public credential. No secret set → every request is rejected.
 const SECRET = Deno.env.get("MAQUINITA_MCP_SECRET") ?? "";
 
-const SERVER_INFO = { name: "maquinita-mcp", version: "1.3.0" };
+const SERVER_INFO = { name: "maquinita-mcp", version: "1.4.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
 
 const supabase = createClient(
@@ -43,6 +43,11 @@ const CORS = {
 // --- Domain helpers ----------------------------------------------------------
 
 const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
+
+/** "YYYY-MM" in Bogotá (UTC-5). `toISOString()` is UTC: from 19:00 on the last day it is already next month. */
+function currentBogotaPeriod(): string {
+  return new Date(Date.now() - 5 * 3600_000).toISOString().slice(0, 7);
+}
 
 /** Fixed source catalog seeded into every new monthly close (mirrors the app). */
 const DEFAULT_CLOSE_SOURCES = [
@@ -366,30 +371,34 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
   },
 
   async eliminar_transaccion(args) {
+    // Rows are never removed: duplicates point at the row kept for a purchase,
+    // and removing it would make the purchase vanish. It is ruled out by hand
+    // instead — uncounted, and never reconsidered by the reconciler.
     if (!args.transaction_id) throw new Error("Falta transaction_id");
     const { data, error } = await supabase
       .from("transactions")
-      .delete()
+      .update({ status: "voided", status_manual: true, status_reason: "manual" })
       .eq("id", args.transaction_id)
       .eq("user_id", OWNER_USER_ID)
-      .select("id, tx_date, merchant, amount_native");
+      .select("id, tx_date, merchant, amount_native, status");
     if (error) throw new Error(error.message);
     if (!data || data.length === 0) throw new Error("No se encontró la transacción o no pertenece al dueño");
-    return { ok: true, deleted: data[0] };
+    return { ok: true, discarded: data[0] };
   },
 
   async eliminar_transacciones_lote(args) {
     if (!Array.isArray(args.ids) || args.ids.length === 0) {
       throw new Error("ids debe ser un array no vacío de transaction IDs");
     }
+    const status = args.status === "duplicate" ? "duplicate" : "voided";
     const { data, error } = await supabase
       .from("transactions")
-      .delete()
+      .update({ status, status_manual: true, status_reason: "manual" })
       .in("id", args.ids)
       .eq("user_id", OWNER_USER_ID)
       .select("id");
     if (error) throw new Error(error.message);
-    return { ok: true, deleted_count: data.length, ids: data.map((d) => d.id) };
+    return { ok: true, discarded_count: data.length, status, ids: data.map((d) => d.id) };
   },
 
   async actualizar_transaccion(args) {
@@ -407,6 +416,23 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
     if (args.amount_usd !== undefined) patch.amount_usd = args.amount_usd;
     if (args.category_name !== undefined || args.category_id !== undefined) {
       patch.category_id = await resolveCategory(args);
+    }
+    // amount_usd is what every total sums: keep it in step with the native amount.
+    const priceChanged =
+      args.amount_native !== undefined || args.fx_rate_to_usd !== undefined || args.native_currency !== undefined;
+    if (priceChanged && args.amount_usd === undefined) {
+      const { data: current, error: currentError } = await supabase
+        .from("transactions")
+        .select("amount_native, fx_rate_to_usd, native_currency")
+        .eq("id", args.transaction_id)
+        .eq("user_id", OWNER_USER_ID)
+        .single();
+      if (currentError) throw new Error(currentError.message);
+      const amount = args.amount_native ?? Number(current.amount_native);
+      const currency = args.native_currency ?? current.native_currency;
+      const fx = args.fx_rate_to_usd ?? (args.native_currency !== undefined ? defaultFx(currency) : Number(current.fx_rate_to_usd));
+      patch.fx_rate_to_usd = fx;
+      patch.amount_usd = round4(amount * fx);
     }
     if (args.status !== undefined) {
       if (!["active", "duplicate", "voided", "internal_transfer"].includes(args.status)) {
@@ -554,14 +580,14 @@ const handlers: Record<string, (args: any) => Promise<unknown>> = {
   // --- Monthly close ---------------------------------------------------------
 
   async leer_cierre(args) {
-    const period: string = args?.period ?? new Date().toISOString().slice(0, 7);
+    const period: string = args?.period ?? currentBogotaPeriod();
     const close = await findClose(period);
     if (!close) return { period, exists: false };
     return { period, exists: true, close };
   },
 
   async crear_cierre(args) {
-    const period: string = args?.period ?? new Date().toISOString().slice(0, 7);
+    const period: string = args?.period ?? currentBogotaPeriod();
     const existing = await findClose(period);
     if (existing) return { ok: true, created: false, close: existing };
 
@@ -791,7 +817,7 @@ const TOOLS = [
   },
   {
     name: "eliminar_transaccion",
-    description: "Elimina una transacción por su ID. Usalo para limpiar duplicados o errores.",
+    description: "Descarta una transacción por su ID (no la borra: queda con status 'voided' manual, fuera de los totales y auditable). Usalo para errores o cargas equivocadas.",
     inputSchema: {
       type: "object",
       properties: { transaction_id: { type: "string", description: "ID de la transacción a eliminar." } },
@@ -800,11 +826,12 @@ const TOOLS = [
   },
   {
     name: "eliminar_transacciones_lote",
-    description: "Elimina varias transacciones por sus IDs de una. Para limpiar duplicados en batch.",
+    description: "Descarta varias transacciones por sus IDs (no las borra). status='duplicate' para duplicados, 'voided' (default) para el resto. Quedan fuera de los totales y auditables.",
     inputSchema: {
       type: "object",
       properties: {
-        ids: { type: "array", items: { type: "string" }, description: "Array de IDs de transacciones a eliminar." },
+        ids: { type: "array", items: { type: "string" }, description: "Array de IDs de transacciones a descartar." },
+        status: { type: "string", description: "duplicate | voided (default voided)." },
       },
       required: ["ids"],
     },

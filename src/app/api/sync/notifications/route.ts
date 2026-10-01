@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { isOwner, OWNER_USER_ID } from "@/lib/owner";
+import { bogotaMonthBounds } from "@/lib/push-ingest/dates";
+import { reconcileMonthAfterLoad } from "@/lib/reconcile/run";
 import { createClient } from "@/lib/supabase/server";
 import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { computeDedupKey } from "@/lib/push-ingest/dedup";
@@ -36,6 +39,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  if (!isOwner(user.id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const body = await request.json();
   const month: string = body.month; // "YYYY-MM"
@@ -45,9 +51,10 @@ export async function POST(request: Request): Promise<NextResponse> {
   const force = body.force === true;
 
   // Month range for filtering by received_at
-  const [year, mon] = month.split("-").map(Number);
-  const monthStart = new Date(year, mon - 1, 1);
-  const monthEnd = new Date(year, mon, 0, 23, 59, 59);
+  // Bogotá month, not the server's (UTC on Vercel): a purchase at 20:00 on the
+  // last day belongs to this month, not the next.
+  const bounds = bogotaMonthBounds(month);
+  const monthStart = new Date(bounds.from);
 
   // A notification received in June is about a June purchase, so the live-ingest
   // window (60 days) would reject it as too old. Allow anything back to the start
@@ -59,9 +66,10 @@ export async function POST(request: Request): Promise<NextResponse> {
   const { data: rawLogs, error: fetchError } = await admin
     .from("push_raw_log")
     .select("id, package_name, payload, received_at")
+    .eq("user_id", OWNER_USER_ID)
     .in("package_name", [...PACKAGE_WHITELIST])
-    .gte("received_at", monthStart.toISOString())
-    .lte("received_at", monthEnd.toISOString())
+    .gte("received_at", bounds.from)
+    .lte("received_at", bounds.to)
     .order("received_at", { ascending: true });
 
   if (fetchError) {
@@ -81,11 +89,12 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // One query for the whole batch instead of a lookup per notification.
   const existingByKey = new Map<string, { status: string; transaction_id: string | null }>();
-  if (jobs.length > 0) {
+  // In chunks: hundreds of 32-char keys in one `.in()` overflow the URL limit.
+  for (let i = 0; i < jobs.length; i += 200) {
     const { data: logs, error: logsError } = await admin
       .from("push_ingest_log")
       .select("dedup_key, status, transaction_id")
-      .in("dedup_key", jobs.map((j) => j.dedupKey));
+      .in("dedup_key", jobs.slice(i, i + 200).map((j) => j.dedupKey));
     if (logsError) {
       return NextResponse.json({ error: logsError.message }, { status: 500 });
     }
@@ -173,6 +182,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       result.items!.push(detail(job, "error"));
     }
   }
+
+  await reconcileMonthAfterLoad(admin, OWNER_USER_ID, month, "sync/notifications");
 
   return NextResponse.json({ result, reprocessed, skipped });
 }

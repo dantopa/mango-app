@@ -12,8 +12,8 @@ import type { SyncSourceResult } from "@/lib/sync/types";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 import { epochToLocalDate, TZ_OFFSETS } from "@/lib/push-ingest/dates";
 import { reconcileRange, shiftDate } from "@/lib/reconcile/run";
+import { OWNER_USER_ID } from "@/lib/owner";
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * GET /api/sync/cron
@@ -87,14 +87,15 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 4. Reconcile the last week: Gmail may have just brought in a purchase the
-  // push pipeline already registered, and any race the per-insert pass missed
-  // is settled here.
+  // 4. Reconcile the last 45 days: Gmail may have just brought in a purchase the
+  // push pipeline already registered, any race the per-insert pass missed is
+  // settled here, and statements loaded through the MCP (which cannot call the
+  // reconciler itself) usually land up to ~2 weeks after their month ends.
   let reconciled = 0;
   try {
     const today = epochToLocalDate(Date.now(), TZ_OFFSETS.BOGOTA);
     const report = await reconcileRange(getSupabaseAdmin(), OWNER_USER_ID, {
-      from: shiftDate(today, -6),
+      from: shiftDate(today, -44),
       to: today,
       trigger: "job",
     });

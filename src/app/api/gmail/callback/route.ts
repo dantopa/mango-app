@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 import { storeRefreshToken } from "@/lib/sync/gmail/token-store";
+import { createClient } from "@/lib/supabase/server";
+import { isOwner } from "@/lib/owner";
 
 /**
  * GET /api/gmail/callback
@@ -22,6 +24,16 @@ export async function GET(request: Request) {
       { error: "Invalid state parameter (CSRF protection)" },
       { status: 403 },
     );
+  }
+
+  // The refresh token is stored as the deployment's single Gmail link, so only
+  // the owner may replace it — not just whoever completed an OAuth round trip.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!isOwner(user?.id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   if (!code) {

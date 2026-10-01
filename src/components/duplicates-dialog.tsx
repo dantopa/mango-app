@@ -120,8 +120,8 @@ export function DuplicatesDialog({ open, onOpenChange, month }: DuplicatesDialog
             Detectar duplicados
           </DialogTitle>
           <DialogDescription>
-            Revisa {formatMonth(month + "-01")} entero y propone qué borrar. No borra nada
-            sin que lo confirmes.
+            Revisa {formatMonth(month + "-01")} entero y propone cuáles son duplicados. No marca
+            nada sin que lo confirmes.
           </DialogDescription>
         </DialogHeader>
 
@@ -154,7 +154,7 @@ export function DuplicatesDialog({ open, onOpenChange, month }: DuplicatesDialog
           <>
             <p className="flex items-center gap-2 text-sm font-medium text-emerald-600">
               <CheckCircle2 className="size-4" />
-              {state.count} {state.count === 1 ? "transacción borrada" : "transacciones borradas"}
+              {state.count} {state.count === 1 ? "transacción marcada como duplicada" : "transacciones marcadas como duplicadas"}
             </p>
             <Button variant="outline" onClick={() => handleOpenChange(false)} className="w-full">
               Cerrar
@@ -200,7 +200,7 @@ export function DuplicatesDialog({ open, onOpenChange, month }: DuplicatesDialog
                   ) : (
                     <Trash2 className="mr-1.5 size-4" />
                   )}
-                  Borrar los duplicados marcados
+                  Marcar como duplicados
                 </Button>
               </>
             )}

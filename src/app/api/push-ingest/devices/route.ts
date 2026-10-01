@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isOwner } from "@/lib/owner";
 
 import { pairDevice, pairSchema } from "@/lib/push-ingest/devices";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
@@ -17,6 +18,9 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (!user) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (!isOwner(user.id)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
     let body: unknown;
@@ -53,6 +57,9 @@ export async function GET(): Promise<NextResponse> {
     if (!user) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
+    if (!isOwner(user.id)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
 
     const { data, error } = await getSupabaseAdmin()
       .from("push_ingest_devices")
@@ -82,6 +89,9 @@ export async function DELETE(request: Request): Promise<NextResponse> {
 
     if (!user) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (!isOwner(user.id)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
     let body: unknown;

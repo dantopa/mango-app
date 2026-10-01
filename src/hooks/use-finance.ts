@@ -206,24 +206,36 @@ async function learnCategoryRule(txId: string, categoryId: string): Promise<void
   });
 }
 
+/**
+ * "Delete" from the UI. Rows are never removed: other rows may point at this one
+ * (`duplicate_of`, `paired_with`), and removing the one kept for a purchase
+ * would make its duplicates vanish from spend. The row is ruled out by hand
+ * instead — hidden, uncounted, and never reconsidered by the reconciler.
+ */
 export function useDeleteTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("transactions").delete().eq("id", id);
+      const { error } = await supabase
+        .from("transactions")
+        .update({ status: "voided", status_manual: true, status_reason: "manual" })
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
   });
 }
 
-/** Bulk delete, for the duplicate audit: one round trip, all or nothing. */
+/** Bulk version, for the duplicate audit: marks the rows as duplicates, all at once. */
 export function useDeleteTransactions() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (ids: string[]) => {
       if (ids.length === 0) return;
-      const { error } = await supabase.from("transactions").delete().in("id", ids);
+      const { error } = await supabase
+        .from("transactions")
+        .update({ status: "duplicate", status_manual: true, status_reason: "manual" })
+        .in("id", ids);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),

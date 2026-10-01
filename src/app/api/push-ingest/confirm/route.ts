@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isOwner, OWNER_USER_ID } from "@/lib/owner";
 import { createClient } from "@/lib/supabase/server";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
 import { resolveRate, calculateUsd } from "@/lib/push-ingest/fx";
@@ -9,7 +10,6 @@ import { resolveAccount, type AccountCandidate } from "@/lib/push-ingest/account
 import type { ParsedTransaction } from "@/lib/push-ingest/types";
 import { reconcileAround } from "@/lib/reconcile/run";
 
-const OWNER_USER_ID = "e99371b1-6163-4216-b624-c79d8ee01520";
 
 /**
  * POST /api/push-ingest/confirm
@@ -24,6 +24,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (!isOwner(user.id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const body = await request.json();
@@ -178,6 +181,9 @@ export async function GET(): Promise<NextResponse> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (!isOwner(user.id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const admin = getSupabaseAdmin();

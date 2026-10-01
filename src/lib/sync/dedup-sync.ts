@@ -95,7 +95,7 @@ export async function evaluateCandidate(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: existingTxs, error: txError } = await (supabase as any)
     .from("transactions")
-    .select("id, merchant, amount_native, tx_date, description_raw, status")
+    .select("id, merchant, amount_native, native_currency, card_last4, tx_date, description_raw, status")
     .eq("user_id", userId)
     .eq("amount_native", candidate.amount_native)
     .gte("tx_date", dateFrom)
@@ -144,11 +144,15 @@ export async function evaluateCandidate(
     // Transform fetched rows to the format resolveDuplicate expects.
     // Since the query filters by amount_native, all rows have the same amount.
     // We add default values for fields not in the query.
+    // From `purchases`, not `existingTxs`: a released hold or an internal
+    // transfer must not absorb a new charge here either.
     const prefetchedTxs = (
-      existingTxs as Array<{
+      purchases as Array<{
         id: string;
         merchant: string | null;
         amount_native: number;
+        native_currency?: string;
+        card_last4?: string | null;
         tx_date: string;
         description_raw: string;
       }>
@@ -156,9 +160,11 @@ export async function evaluateCandidate(
       id: tx.id,
       merchant: tx.merchant,
       amount_native: tx.amount_native,
-      native_currency: candidate.native_currency, // same currency (query filtered by amount)
+      // The query filters by amount only: a USDT row of the same number is not
+      // the same purchase as a USD one.
+      native_currency: tx.native_currency ?? candidate.native_currency,
       amount_usd: null as number | null,
-      card_last4: null as string | null, // extracted from description_raw by core
+      card_last4: tx.card_last4 ?? null, // core also extracts it from description_raw
       tx_date: tx.tx_date,
       external_ts: null as string | null, // sync doesn't have this
       description_raw: tx.description_raw as string | null,

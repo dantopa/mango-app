@@ -96,7 +96,7 @@ export function TransactionsTable({
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("¿Eliminar esta transacción? Esta acción no se puede deshacer.")) return;
+    if (!window.confirm("¿Descartar esta transacción? Deja de contar en los gastos, pero queda guardada.")) return;
     setPendingId(id);
     try {
       await deleteTx.mutateAsync(id);
@@ -643,7 +643,7 @@ function DimensionEditor({
           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-destructive/30 px-3 text-sm text-destructive transition-colors hover:bg-destructive/10"
         >
           <Trash2 className="size-3.5" />
-          Eliminar
+          Descartar
         </button>
       </div>
     </div>

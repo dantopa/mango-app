@@ -44,6 +44,10 @@ describe("compareMerchants — token containment", () => {
 // --- Property-based test: Commutativity of compareMerchants ---
 // **Validates: Requirements 7.8**
 
+/** A merchant word that survives normalization (corporate suffixes are stripped by design). */
+const CORPORATE_SUFFIXES = new Set(["SA", "SAS", "SL", "LTDA", "COL"]);
+const merchantWord = fc.stringMatching(/^[A-Z]{2,8}$/).filter((w) => !CORPORATE_SUFFIXES.has(w));
+
 describe("Property 7: Token containment commutativity", () => {
   it("compareMerchants(a, b) === compareMerchants(b, a) for all inputs", () => {
     fc.assert(
@@ -59,14 +63,17 @@ describe("Property 7: Token containment commutativity", () => {
   });
 
   it("when tokens(norm(a)) ⊆ tokens(norm(b)) → compareMerchants(a, b) === 'match'", () => {
-    // Generate pairs where the shorter is a subset of the longer
+    // Generate pairs where the shorter is a subset of the longer. Corporate
+    // suffixes ("SA", "SAS", …) are excluded: normalizeMerchant strips them on
+    // purpose, so "SA" normalizes to "" and the premise no longer holds — the
+    // generator produced ["SA", "SA AA"] about once in five runs.
     const tokenSubsetArb = fc
       .tuple(
-        fc.array(fc.stringMatching(/^[A-Z]{2,8}$/), {
+        fc.array(merchantWord, {
           minLength: 1,
           maxLength: 3,
         }),
-        fc.array(fc.stringMatching(/^[A-Z]{2,8}$/), {
+        fc.array(merchantWord, {
           minLength: 1,
           maxLength: 3,
         })

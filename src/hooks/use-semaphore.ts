@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { computeSemaphore } from "@/lib/push-ingest/semaphore";
 import type { SemaphoreResult } from "@/lib/push-ingest/types";
 import { useSettings } from "./use-settings";
+import { bogotaMonthInfo } from "@/lib/push-ingest/dates";
 
 const supabase = createClient();
 
@@ -18,26 +19,17 @@ export type SemaphoreData = SemaphoreResult & {
  * Get the first and last day of the current month as ISO date strings.
  */
 function getCurrentMonthRange(): { start: string; end: string } {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth(); // 0-indexed
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 0); // last day of current month
-
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-  return { start: fmt(start), end: fmt(end) };
+  // Bogotá calendar, like every tx_date — not the phone's timezone while traveling.
+  const { start, end } = bogotaMonthInfo();
+  return { start, end };
 }
 
 /**
  * Get today's day of month and total days in month.
  */
 function getMonthInfo(): { currentDay: number; daysInMonth: number } {
-  const now = new Date();
-  const currentDay = now.getDate();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  return { currentDay, daysInMonth };
+  const { day, daysInMonth } = bogotaMonthInfo();
+  return { currentDay: day, daysInMonth };
 }
 
 /**
