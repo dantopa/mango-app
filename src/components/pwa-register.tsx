@@ -10,29 +10,54 @@ import {
 } from "react";
 
 import { SwUpdateToast } from "@/components/sw-update-toast";
+import { CURRENT_BUILD, isNewerBuild, takeUpdatedFrom } from "@/lib/app-version";
 
 // ---------------------------------------------------------------------------
-// Context for SW update state — consumed by sw-update-toast.tsx (task 4.5)
+// Context: what version is running and whether a newer one is deployed
 // ---------------------------------------------------------------------------
+
+export type UpdateStatus = "idle" | "checking" | "current" | "available" | "error";
 
 interface SwUpdateContextValue {
-  /** True when a new SW version is installed and waiting to activate */
-  hasUpdate: boolean;
-  /** Triggers SKIP_WAITING on the waiting SW, causing reload on controllerchange */
-  onReload: () => void;
-  /** Dismiss the update notification without reloading */
-  onDismiss: () => void;
+  status: UpdateStatus;
+  /** Build the server reported on the last successful check. */
+  latestBuild: string | null;
+  /** When the last check finished (ms), or null if none yet. */
+  lastCheckedAt: number | null;
+  /** Asks the server for the deployed build. */
+  checkForUpdate: () => Promise<void>;
+  /** Reloads into the deployed build. */
+  applyUpdate: () => void;
 }
 
 const SwUpdateContext = createContext<SwUpdateContextValue>({
-  hasUpdate: false,
-  onReload: () => {},
-  onDismiss: () => {},
+  status: "idle",
+  latestBuild: null,
+  lastCheckedAt: null,
+  checkForUpdate: async () => {},
+  applyUpdate: () => {},
 });
 
-/** Hook for consuming SW update state (used by sw-update-toast). */
+/** Version and update state, for the toast and the Ajustes card. */
 export function useSwUpdate() {
   return useContext(SwUpdateContext);
+}
+
+/** Background checks: on return to the app, at most this often. */
+const RESUME_CHECK_MIN_INTERVAL_MS = 5 * 60 * 1000;
+/** ...and periodically while it stays open. */
+const PERIODIC_CHECK_MS = 30 * 60 * 1000;
+/** First check after load, once the page has settled. */
+const FIRST_CHECK_DELAY_MS = 3000;
+/** The "se actualizó" confirmation waits for the first paint. */
+const UPDATED_TOAST_DELAY_MS = 800;
+
+function safeLocalStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -40,98 +65,112 @@ export function useSwUpdate() {
 // ---------------------------------------------------------------------------
 
 /**
- * Registers the service worker and handles the SW update lifecycle.
+ * Registers the service worker and tracks the app version.
  *
- * Detects when a new SW is installed and waiting, listens for controllerchange
- * to reload the page, and exposes hasUpdate/onReload/onDismiss via React context
- * so the update toast can trigger SKIP_WAITING.
+ * Opening the app always loads the deployed build (navigation is network
+ * first). What goes stale is a session resumed from the background — the usual
+ * case in the Android app — which keeps running the code it loaded. So the
+ * deployed build is asked for on load, on every return to the app and every
+ * half hour, and a newer one is offered with a toast instead of reloading
+ * under the owner's fingers. After the reload, a second toast confirms it.
  */
 export function PwaRegister({ children }: { children?: React.ReactNode }) {
-  const [hasUpdate, setHasUpdate] = useState(false);
-  const waitingSw = useRef<ServiceWorker | null>(null);
+  const [status, setStatus] = useState<UpdateStatus>("idle");
+  const [latestBuild, setLatestBuild] = useState<string | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
+  const [toast, setToast] = useState<"available" | "updated" | null>(null);
+  const [updatedFrom, setUpdatedFrom] = useState<string | null>(null);
+  const registration = useRef<ServiceWorkerRegistration | null>(null);
+  const lastCheck = useRef(0);
+  const announced = useRef<string | null>(null);
 
-  const onReload = useCallback(() => {
-    const sw = waitingSw.current;
-    if (sw) {
-      sw.postMessage({ type: "SKIP_WAITING" });
+  const checkForUpdate = useCallback(async () => {
+    lastCheck.current = Date.now();
+    setStatus((s) => (s === "available" ? s : "checking"));
+    try {
+      const res = await fetch("/api/version", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const { build } = (await res.json()) as { build?: string };
+      setLatestBuild(build ?? null);
+      if (isNewerBuild(CURRENT_BUILD, build)) {
+        setStatus("available");
+        // Announce each new build once, not on every check.
+        if (build && announced.current !== build) {
+          announced.current = build;
+          setToast("available");
+        }
+        // Have the new service worker ready before the reload.
+        registration.current?.update().catch(() => {});
+      } else {
+        setStatus("current");
+      }
+    } catch {
+      // Offline or the request failed: nothing is known, nothing is offered.
+      setStatus((s) => (s === "available" ? s : "error"));
+    } finally {
+      setLastCheckedAt(Date.now());
     }
   }, []);
 
-  const onDismiss = useCallback(() => {
-    setHasUpdate(false);
+  const applyUpdate = useCallback(() => {
+    // Navigation is network first, so a reload is what loads the new build.
+    window.location.reload();
   }, []);
 
+  // Confirm an update that just happened. Read after mount (storage does not
+  // exist on the server render), and shown once the page has painted.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const previous = takeUpdatedFrom(safeLocalStorage());
+      if (previous) {
+        setUpdatedFrom(previous);
+        setToast("updated");
+      }
+    }, UPDATED_TOAST_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Service worker registration.
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-
-    // Track when a new SW moves to "installed" (waiting) state
-    function onStateChange(this: ServiceWorker) {
-      if (this.state === "installed" && navigator.serviceWorker.controller) {
-        // Only show update if there's already an active controller
-        // (i.e. this is a genuine update, not a first-time install)
-        waitingSw.current = this;
-        setHasUpdate(true);
-      }
-    }
-
-    // When a new controller takes over, reload to pick up the new version.
-    // Guard against multiple reloads with a flag.
-    let refreshing = false;
-    function onControllerChange() {
-      if (refreshing) return;
-      refreshing = true;
-      window.location.reload();
-    }
-
     navigator.serviceWorker
       .register("/sw.js")
       .then((reg) => {
-        // If there's already a waiting SW (e.g. page was refreshed while
-        // an update waited)
-        if (reg.waiting) {
-          waitingSw.current = reg.waiting;
-          setHasUpdate(true);
-          return;
-        }
-
-        // If there's an installing SW, listen for it to reach "installed"
-        if (reg.installing) {
-          reg.installing.addEventListener("statechange", onStateChange);
-        }
-
-        // Detect future updates
-        reg.addEventListener("updatefound", () => {
-          const newSw = reg.installing;
-          if (newSw) {
-            newSw.addEventListener("statechange", onStateChange);
-          }
-        });
+        registration.current = reg;
       })
       .catch(() => {
         /* registration failures are non-fatal */
       });
-
-    // Listen for controllerchange — the new SW has claimed clients
-    navigator.serviceWorker.addEventListener(
-      "controllerchange",
-      onControllerChange,
-    );
-
-    return () => {
-      navigator.serviceWorker.removeEventListener(
-        "controllerchange",
-        onControllerChange,
-      );
-    };
   }, []);
 
+  // When to ask the server.
+  useEffect(() => {
+    const first = setTimeout(checkForUpdate, FIRST_CHECK_DELAY_MS);
+    const periodic = setInterval(checkForUpdate, PERIODIC_CHECK_MS);
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastCheck.current < RESUME_CHECK_MIN_INTERVAL_MS) return;
+      void checkForUpdate();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearTimeout(first);
+      clearInterval(periodic);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [checkForUpdate]);
+
+  const dismissToast = useCallback(() => setToast(null), []);
+
   return (
-    <SwUpdateContext.Provider value={{ hasUpdate, onReload, onDismiss }}>
+    <SwUpdateContext.Provider value={{ status, latestBuild, lastCheckedAt, checkForUpdate, applyUpdate }}>
       {children}
       <SwUpdateToast
-        visible={hasUpdate}
-        onReload={onReload}
-        onDismiss={onDismiss}
+        kind={toast}
+        build={toast === "updated" ? CURRENT_BUILD : latestBuild}
+        previousBuild={updatedFrom}
+        onReload={applyUpdate}
+        onDismiss={dismissToast}
       />
     </SwUpdateContext.Provider>
   );

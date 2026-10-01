@@ -7,6 +7,7 @@ import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { VersionCard } from "@/components/version-card";
 
 function timestamp() {
   return new Date().toLocaleTimeString("es-AR", { hour12: false });
@@ -222,6 +223,8 @@ export default function SettingsPage() {
           Diagnóstico y pruebas de notificaciones push
         </p>
       </div>
+
+      <VersionCard />
 
       <Card>
         <CardHeader>
