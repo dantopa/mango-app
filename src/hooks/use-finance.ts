@@ -12,6 +12,7 @@ import type {
   NetWorthSnapshot,
   TransactionWithRelations,
 } from "@/lib/types";
+import { TRANSACTION_LIST_COLUMNS } from "@/lib/types";
 import type { GoalFormValues, TransactionEditValues } from "@/lib/schemas";
 import { extractPattern, isUsablePattern } from "@/lib/push-ingest/pattern";
 
@@ -111,7 +112,7 @@ export function useTransactions() {
       const rows = await fetchAllPages((from, to) =>
         supabase
           .from("transactions")
-          .select("*, account:accounts(id,name,type), category:categories(id,name,color)")
+          .select(`${TRANSACTION_LIST_COLUMNS.join(",")}, account:accounts(id,name,type), category:categories(id,name,color)`)
           // Duplicates, released holds and internal transfers stay in the table
           // for audit, but they are not transactions the owner made.
           .eq("status", "active")

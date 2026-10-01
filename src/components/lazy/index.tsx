@@ -35,6 +35,16 @@ export const LazyCategoryBarChart = dynamic(
   { loading: () => <ChartSkeleton height={280} /> }
 );
 
+// Small enough to look static, but importing it eagerly put all of recharts
+// (~95 kB gzipped) in /patrimonio's first load.
+export const LazySparkline = dynamic(
+  () =>
+    import("@/components/charts/sparkline").then((m) => ({
+      default: m.Sparkline,
+    })),
+  { loading: () => <ChartSkeleton height={32} /> }
+);
+
 // --- Dialog components (client-only, no SSR) ---
 
 export const LazySyncDialog = dynamic(
