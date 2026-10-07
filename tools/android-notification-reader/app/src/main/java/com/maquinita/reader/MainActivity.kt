@@ -50,6 +50,9 @@ class MainActivity : Activity() {
         // Every visit to this screen is also a chance to restore the watchdog, in
         // case the system dropped its schedule while the app was away.
         SensorWatchdog.schedule(this)
+        // Coming back from approving this phone in the browser: the widget may still be
+        // saying it is not approved, and should not wait half an hour to find out.
+        WidgetRefresh.requestNow(this)
         refreshStatus()
     }
 

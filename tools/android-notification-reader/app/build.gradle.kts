@@ -67,4 +67,10 @@ dependencies {
     // Chrome renders the PWA full screen, so the web push and the session are the
     // browser's — a plain WebView supports neither.
     implementation("com.google.androidbrowserhelper:androidbrowserhelper:2.5.0")
+
+    // The widget's logic (formatting, what is hidden, bar geometry) has no Android in
+    // it on purpose, so it is checked by plain unit tests. org.json is a stub in the
+    // android.jar they run against, hence the real one.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

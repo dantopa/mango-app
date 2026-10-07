@@ -41,4 +41,16 @@
     <!-- Posted by SensorWatchdog, and only while the access is missing. -->
     <string name="sensor_channel_name">Estado del lector</string>
     <string name="sensor_status_no_access">Falta el acceso a notificaciones. Tocá para arreglarlo.</string>
+
+    <!-- Home-screen widget. -->
+    <string name="widget_label">Gasto del mes</string>
+    <string name="widget_description">Cuánto llevás gastado contra tu techo, cuánto podés gastar hoy y tu último gasto.</string>
+    <string name="widget_hide_values">Ocultar valores</string>
+    <string name="widget_show_values">Mostrar valores</string>
+    <string name="widget_pair_title">Falta vincular el teléfono</string>
+    <string name="widget_pair_body">Tocá para vincularlo y ver tu mes acá.</string>
+    <string name="widget_unauthorized_title">Teléfono sin aprobar</string>
+    <string name="widget_unauthorized_body">El servidor no reconoce este teléfono. Tocá para vincularlo de nuevo.</string>
+    <string name="widget_empty_title">Maquinita</string>
+    <string name="widget_empty_body">Cargando tu mes… se actualiza apenas haya conexión.</string>
 </resources>

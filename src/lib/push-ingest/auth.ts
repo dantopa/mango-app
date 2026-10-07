@@ -45,7 +45,8 @@ export async function validateIngestAuth(authHeader: string | null): Promise<Aut
   return device ? { ok: true } : UNAUTHORIZED;
 }
 
-function bearerToken(authHeader: string | null): string | null {
+/** The token of an `Authorization: Bearer <token>` header, or null. */
+export function bearerToken(authHeader: string | null): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice("Bearer ".length);
   return token.length > 0 ? token : null;

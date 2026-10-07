@@ -6,4 +6,14 @@
 
     <!-- The logo's green. Tints the notification icon and its accents in the shade. -->
     <color name="brand_green">#13c362</color>
+
+    <!-- Home-screen widget. Same palette as the web app's dark theme. -->
+    <color name="widget_text">#FAFAFA</color>
+    <color name="widget_muted">#A1A1AA</color>
+    <!-- 5.4:1 on the card; the zinc-500 it replaces was 3.8:1, under the 4.5:1 for small text. -->
+    <color name="widget_tertiary">#8A8A94</color>
+    <color name="tone_positive">#22C55E</color>
+    <color name="tone_warning">#F59E0B</color>
+    <color name="tone_danger">#EF4444</color>
+    <color name="tone_neutral">#71717A</color>
 </resources>
