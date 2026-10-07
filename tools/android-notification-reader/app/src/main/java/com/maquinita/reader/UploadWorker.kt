@@ -34,11 +34,25 @@ class UploadWorker(context: Context, params: WorkerParameters) : Worker(context,
             return Result.failure()
         }
 
+        // The server has processed an expense by the time it answers, so the widget's
+        // month is out of date the moment one is sent — refresh it once the batch ends.
+        var sentAny = false
         while (true) {
-            val payload = IngestQueue.peek(applicationContext) ?: return Result.success()
+            val payload = IngestQueue.peek(applicationContext)
+            if (payload == null) {
+                if (sentAny) WidgetRefresh.requestNow(applicationContext)
+                return Result.success()
+            }
             when (post(settings, payload)) {
-                Outcome.SENT, Outcome.REJECTED -> IngestQueue.removeFirst(applicationContext)
-                Outcome.RETRY -> return Result.retry()
+                Outcome.SENT -> {
+                    sentAny = true
+                    IngestQueue.removeFirst(applicationContext)
+                }
+                Outcome.REJECTED -> IngestQueue.removeFirst(applicationContext)
+                Outcome.RETRY -> {
+                    if (sentAny) WidgetRefresh.requestNow(applicationContext)
+                    return Result.retry()
+                }
             }
         }
     }

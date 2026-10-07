@@ -20,6 +20,10 @@ class Settings(context: Context) {
     val endpoint: String
         get() = app.getString(R.string.twa_url) + INGEST_PATH
 
+    /** The widget's summary: same origin, same token, read-only. */
+    val widgetEndpoint: String
+        get() = app.getString(R.string.twa_url) + WIDGET_PATH
+
     var token: String
         get() = prefs.getString(KEY_TOKEN, "").orEmpty()
         set(value) {
@@ -48,6 +52,7 @@ class Settings(context: Context) {
 
     private companion object {
         const val INGEST_PATH = "/api/push-ingest"
+        const val WIDGET_PATH = "/api/widget"
         const val KEY_TOKEN = "token"
         const val KEY_LAST_RESULT = "last_result"
         const val KEY_LAST_RESULT_AT = "last_result_at"

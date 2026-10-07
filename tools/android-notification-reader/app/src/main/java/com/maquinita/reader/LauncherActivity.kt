@@ -26,6 +26,8 @@ class LauncherActivity : TwaLauncherActivity() {
         // Opening the dashboard is the most frequent thing that happens to this app,
         // so it is also the cheapest place to make sure the watchdog is scheduled.
         SensorWatchdog.schedule(this)
+        // Opening the app is also the moment the widget is most likely to be looked at.
+        WidgetRefresh.requestNow(this)
         val problem = sensorProblem() ?: return
         warn(problem)
     }

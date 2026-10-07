@@ -171,6 +171,23 @@
         </service>
 
         <!--
+          Home-screen widget. Not exported on purpose: the system reaches it as the
+          widget host, and the taps come from its own PendingIntents, so no other app
+          can send it a refresh or flip the "hide values" switch.
+        -->
+        <receiver
+            android:name=".MaquinitaWidget"
+            android:exported="false"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
+        </receiver>
+
+        <!--
           SensorWatchdog needs no declaration: WorkManager's own provider registers
           its workers, and reschedules them after a reboot.
         -->

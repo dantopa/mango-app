@@ -60,6 +60,62 @@ códigos de un solo uso. Un SMS se sube si menciona un banco o una operación
 que recibís sale del celu y además se come una llamada al LLM, porque `sms.ts`
 escala a la IA todo lo que ningún parser reconoce.
 
+## Widget
+
+Un widget de pantalla de inicio (4×2, redimensionable): el gasto del mes contra el
+techo, con el semáforo de siempre, cuánto se puede gastar hoy, y el último gasto.
+Un ojo en la esquina oculta las cifras.
+
+```
+● Octubre  día 12 de 31                14:35  👁
+US$ 1.184  de US$ 3.100                    38%
+▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░  ← marca: dónde estarías a ritmo parejo
+HOY PODÉS GASTAR   ÚLTIMO · HOY 14:32
+US$ 96             Rappi          US$ 12,40
+```
+
+**De dónde sale.** `GET /api/widget` devuelve el resumen del mes — nada más: ni lista
+de movimientos, ni descripciones, ni cuentas. La cuenta del gasto es la del semáforo
+de la app y de las alertas push (activos, sin pagos, USD positivo, mes de Bogotá),
+así que no pueden discrepar. Se autentica con el **token de este teléfono** y solo con
+ese: el secreto compartido `PUSH_INGEST_SECRET` no sirve para leer gastos.
+
+**Qué implica para el token.** Hasta ahora solo podía escribir notificaciones; ahora
+también lee ese resumen. Si el servidor lo revoca o nunca lo aprobó (401), el widget
+deja de mostrar cifras *y borra lo que tenía guardado*: un teléfono perdido, con el
+token revocado, no sigue mostrando el gasto del mes.
+
+**Cuándo se actualiza.** Nunca espera a la red: cada redibujo sale del último resumen
+guardado, y `WidgetRefreshWorker` lo renueva en segundo plano — al agregar el widget,
+al abrir la app, cuando se sube un gasto, y cada 30 minutos con conexión. Sin señal
+sigue mostrando el último dato, con la hora en ámbar cuando tiene más de 2 h.
+
+**Ocultar valores.** El ojo es local al teléfono y no pasa por el servidor. Oculto, el
+widget no tiene ninguna cifra ni el nombre del comercio — ni en pantalla ni para
+TalkBack —, y la barra queda vacía (puntitos) para que su largo no delate el monto. Se
+conserva el color del semáforo. Está cubierto por un test (`WidgetPresenterTest`) que
+falla si algún texto filtra una cifra.
+
+**Seguridad.** El receiver no está exportado: el sistema lo alcanza como host de
+widgets y los toques salen de sus propios `PendingIntent` (explícitos e inmutables),
+así que ninguna otra app puede mandarle un refresh falso ni cambiar el ojo. Solo
+`home_screen`: no se ofrece en la pantalla de bloqueo.
+
+**Cómo está armado.** Es un `AppWidgetProvider` con `RemoteViews`, sin Glance: Glance
+obliga a subir Kotlin y a sumar el compilador de Compose a un APK que hoy no lo
+necesita. Todo lo que *decide* qué se muestra (formato, qué se oculta, geometría de la
+barra) está en clases sin Android — `WidgetPresenter`, `WidgetFormat`, `BarGeometry` —
+y se prueba con unit tests; el render (`WidgetRenderer`, `BarRenderer`) solo pinta lo
+que ellas dicen.
+
+```bash
+./gradlew :app:testDebugUnitTest     # lógica del widget
+./gradlew assembleRelease            # el APK de siempre
+```
+
+Después de instalar: mantené apretado un lugar vacío de la pantalla de inicio →
+*Widgets* → **Maquinita · Gasto del mes**.
+
 ## Digital Asset Links
 
 La TWA solo esconde la barra de URL si el sitio y la app se reconocen mutuamente:
