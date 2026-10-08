@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bell, BellOff, Send, RefreshCw, Smartphone } from "lucide-react";
+import { Bell, BellOff, Send, RefreshCw, Smartphone, Target } from "lucide-react";
 
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { BudgetSettings } from "@/components/budget-settings";
 import { VersionCard } from "@/components/version-card";
 
 function timestamp() {
@@ -220,9 +221,25 @@ export default function SettingsPage() {
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Configuración</h1>
         <p className="text-muted-foreground">
-          Diagnóstico y pruebas de notificaciones push
+          Presupuesto, versión y diagnóstico de notificaciones
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Target className="size-5" />
+            Presupuesto mensual
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Tu techo de gasto del mes, en USD. Lo usan el semáforo, las alertas y el widget del
+            teléfono; el widget lo toma en la próxima actualización.
+          </p>
+          <BudgetSettings />
+        </CardContent>
+      </Card>
 
       <VersionCard />
 

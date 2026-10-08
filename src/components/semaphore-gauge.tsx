@@ -1,5 +1,9 @@
 "use client";
 
+import * as React from "react";
+import { Pencil } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useSemaphore } from "@/hooks/use-semaphore";
 import { BudgetSettings } from "@/components/budget-settings";
@@ -31,6 +35,8 @@ function formatUSD(value: number): string {
 
 export function SemaphoreGauge() {
   const { data, isLoading, error } = useSemaphore();
+  // Hooks come before the early returns below.
+  const [editing, setEditing] = React.useState(false);
 
   if (isLoading) {
     return (
@@ -81,13 +87,33 @@ export function SemaphoreGauge() {
       <CardContent className="flex flex-col gap-3 p-4 sm:p-5">
         {/* Header */}
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-xs text-muted-foreground sm:text-sm">
-            Presupuesto mensual
-          </span>
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="truncate text-xs text-muted-foreground sm:text-sm">
+              Presupuesto mensual
+            </span>
+            {/* Without this, a ceiling that was set once could never be changed. */}
+            {!editing && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                onClick={() => setEditing(true)}
+                aria-label="Editar techo mensual"
+              >
+                <Pencil className="size-3" />
+                Editar
+              </Button>
+            )}
+          </div>
           <span className={`text-xs font-medium sm:text-sm ${config.textColor}`}>
             {config.label}
           </span>
         </div>
+
+        {editing && (
+          <BudgetSettings onSaved={() => setEditing(false)} onCancel={() => setEditing(false)} />
+        )}
 
         {/* Progress bar */}
         <div className={`h-3 w-full overflow-hidden rounded-full ${config.trackColor}`}>
