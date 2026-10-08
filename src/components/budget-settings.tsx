@@ -10,8 +10,18 @@ import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 /**
  * Inline form to configure the monthly budget ceiling.
  * Shows current value or "No configurado", with an input + save button.
+ *
+ * `onSaved` and `onCancel` let a screen that opens the form on demand (the
+ * gauge's "Editar") close it again; where the form is always visible (Ajustes)
+ * neither is passed and the form simply stays.
  */
-export function BudgetSettings() {
+export function BudgetSettings({
+  onSaved,
+  onCancel,
+}: {
+  onSaved?: () => void;
+  onCancel?: () => void;
+} = {}) {
   const { data: settings, isLoading } = useSettings();
   const update = useUpdateSettings();
   const [value, setValue] = React.useState("");
@@ -32,9 +42,16 @@ export function BudgetSettings() {
     const parsed = parseFloat(value);
     if (isNaN(parsed) || parsed < 0) return;
 
-    await update.mutateAsync({ budget_ceiling_usd: parsed || null });
+    try {
+      await update.mutateAsync({ budget_ceiling_usd: parsed || null });
+    } catch {
+      // Shown through `update.error` below; rethrowing would only leave an
+      // unhandled rejection in the console and still report nothing as saved.
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    onSaved?.();
   }
 
   if (isLoading) {
@@ -47,7 +64,7 @@ export function BudgetSettings() {
   }
 
   return (
-    <form onSubmit={onSave} className="flex items-center gap-2">
+    <form onSubmit={onSave} className="flex flex-wrap items-center gap-2">
       <Input
         type="number"
         inputMode="decimal"
@@ -73,6 +90,11 @@ export function BudgetSettings() {
           "Guardar"
         )}
       </Button>
+      {onCancel && (
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+          Cancelar
+        </Button>
+      )}
       {saved && (
         <span className="text-xs text-emerald-600">Guardado ✓</span>
       )}
