@@ -10,6 +10,7 @@ export const PACKAGE_WHITELIST = new Set([
   "com.todo1.mobile",                       // Bancolombia
   "com.bbva.nxt_argentina",                 // BBVA Argentina
   "com.nequi.MobileApp",                    // Nequi
+  "com.brubank",                            // Brubank (Argentina)
 
   // Payment / card apps
   "com.grability.rappi",                    // Rappi / RappiCard

@@ -96,7 +96,7 @@ class NotificationReaderService : NotificationListenerService() {
         // matched. A brand name alone counts as a signal, which is why the one-time
         // code list below has to cover both languages too.
         private val FINANCIAL_SIGNAL = Regex(
-            "bancolombia|nequi|bbva|rappi|nexo|davivienda|" +
+            "bancolombia|nequi|bbva|brubank|rappi|nexo|davivienda|" +
                 "compra|transacci[oó]n|d[eé]bito|cr[eé]dito|retiro|pago|transferencia|consumo|" +
                 "purchase|transaction|debit|credit card|withdraw|payment|transfer|charged",
             RegexOption.IGNORE_CASE,
@@ -114,6 +114,7 @@ class NotificationReaderService : NotificationListenerService() {
             "com.todo1.mobile",                     // Bancolombia
             "com.bbva.nxt_argentina",               // BBVA Argentina
             "com.nequi.MobileApp",                  // Nequi
+            "com.brubank",                          // Brubank (Argentina)
 
             // Payment / card apps
             "com.grability.rappi",                  // Rappi / RappiCard
