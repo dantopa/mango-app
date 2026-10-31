@@ -91,6 +91,7 @@ describe("isWhitelistedPackage (shared PACKAGE_WHITELIST)", () => {
     expect(isWhitelistedPackage("com.nexowallet")).toBe(true);
     expect(isWhitelistedPackage("com.bbva.nxt_argentina")).toBe(true);
     expect(isWhitelistedPackage("com.nequi.MobileApp")).toBe(true);
+    expect(isWhitelistedPackage("com.brubank")).toBe(true);
     expect(isWhitelistedPackage("com.google.android.apps.walletnfcrel")).toBe(true);
   });
 
