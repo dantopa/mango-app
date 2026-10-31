@@ -65,9 +65,22 @@ function extractBeneficiaryFromPago(text: string): string | null {
 
 /**
  * Extract destination from TRANSFERENCIA text.
- * Pattern: "transferiste $X a ... cta *XXXX"
+ *
+ * Two formats name a beneficiary this way:
+ *  - "transferiste $X a DEST." (older)
+ *  - "Transferiste $X por Boton Bancolombia a DEST desde producto *9898. <fecha>",
+ *    the Bancolombia button — how the rent (Palomma) and Wompi are paid. Before
+ *    this was read, those arrived with no merchant at all.
+ *
+ * The other two formats are deliberately left alone. "… a la llave X desde tu
+ * cuenta *N a NAME el …" keeps its whole tail as the merchant, and categorization
+ * rules such as "la llave 1037598349" match against exactly that text: replacing
+ * it with just NAME would silently stop them from matching. And a transfer to
+ * "la cuenta *N" has no name to extract.
  */
 function extractDestinationFromTransfer(text: string): string | null {
+  const button = text.match(/transferiste \$[\d.,]+ por [^.]*? a (.+?) desde producto \*\d+/i);
+  if (button) return button[1].trim();
   const match = text.match(/transferiste \$[\d.,]+ a (.+?)(?:\.|,|$)/i);
   return match ? match[1].trim() : null;
 }

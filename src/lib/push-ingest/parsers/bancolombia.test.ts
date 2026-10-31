@@ -82,6 +82,63 @@ describe("bancolombiaParser", () => {
     expect(tx.is_income).toBeUndefined();
   });
 
+  describe("transfers through the Bancolombia button (the rent, Wompi)", () => {
+    // Real texts: these are the ones that used to arrive with no merchant.
+    const rent =
+      "Bancolombia: Transferiste $1,996,900.00 por Boton Bancolombia a PALOMMA SAS desde producto *9898. 30/10/2026 23:22:40 ¿Dudas? 018000931987.";
+
+    it("reads who was paid", () => {
+      const tx = expectTransaction(bancolombiaParser({ ...basePayload, text: rent }));
+
+      expect(tx.merchant).toBe("PALOMMA SAS");
+      expect(tx.amount_native).toBe(1996900);
+      expect(tx.native_currency).toBe("COP");
+      expect(tx.tx_date).toBe("2026-10-30");
+      expect(tx.card_last4).toBe("9898");
+      expect(tx.is_income).toBeUndefined();
+    });
+
+    it("reads any beneficiary of the button, not just the rent", () => {
+      const tx = expectTransaction(
+        bancolombiaParser({
+          ...basePayload,
+          text: "Bancolombia: Transferiste $26,900.00 por Boton Bancolombia a Wompi SAS desde producto *9898. 07/10/2026 07:11:58 ¿Dudas? 018000931987.",
+        }),
+      );
+
+      expect(tx.merchant).toBe("Wompi SAS");
+      expect(tx.amount_native).toBe(26900);
+    });
+  });
+
+  describe("transfer formats whose merchant must stay as it is", () => {
+    it("keeps the whole tail of a Bre-B transfer, which categorization rules match against", () => {
+      const tx = expectTransaction(
+        bancolombiaParser({
+          ...basePayload,
+          text: "Bancolombia: PATRICIO, transferiste $30,000.00 a la llave 1037598349 desde tu cuenta *9898 a TATIANA MEJIA JERVIS el 18/10/26 a las 17:52. Con Bre-b es de una y gratis. Dudas al 018000931987.",
+        }),
+      );
+
+      // Rules like "la llave 1037598349" are substring matches on this text. Cutting it
+      // down to the name would stop them matching without any error anywhere.
+      expect(tx.merchant).toContain("la llave 1037598349");
+      expect(tx.merchant).toContain("TATIANA MEJIA JERVIS");
+    });
+
+    it("has no merchant for a transfer to an account number", () => {
+      const tx = expectTransaction(
+        bancolombiaParser({
+          ...basePayload,
+          text: "Bancolombia: Transferiste $176,000.00 desde tu cuenta *9898 a la cuenta *3105874789 el 02/10/2026 a las 12:51. ¿Dudas? Llamanos al 018000931987. Estamos cerca.",
+        }),
+      );
+
+      expect(tx.merchant).toBeNull();
+      expect(tx.amount_native).toBe(176000);
+    });
+  });
+
   it("escalates an unrecognized text", () => {
     expect(
       bancolombiaParser({ ...basePayload, text: "Tu clave dinámica es 123456." }).kind,
