@@ -53,6 +53,8 @@ class MainActivity : Activity() {
         // Coming back from approving this phone in the browser: the widget may still be
         // saying it is not approved, and should not wait half an hour to find out.
         WidgetRefresh.requestNow(this)
+        AppsSync.schedule(this)
+        AppsSync.requestNow(this)
         refreshStatus()
     }
 

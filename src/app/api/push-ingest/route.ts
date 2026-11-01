@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { validateIngestAuth } from "@/lib/push-ingest/auth";
-import { isWhitelistedPackage } from "@/lib/push-ingest/package-whitelist";
+import { isAllowed, loadPackagePolicy } from "@/lib/push-ingest/package-policy";
 import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { checkRateLimit } from "@/lib/push-ingest/rate-limiter";
 import { checkSms } from "@/lib/push-ingest/sms-gate";
@@ -43,12 +43,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "invalid_json" }, { status: 400 });
     }
 
-    // 5. Extract package name and check whitelist
+    // 5. Extract package name and check the user's app list (defaults + decisions)
     // Came from request.json(), so every value is JSON-serializable by construction.
     const rawPayload = body as Record<string, Json>;
     const packageName = String(rawPayload.packageName ?? rawPayload.appName ?? rawPayload.package ?? "unknown");
 
-    if (!isWhitelistedPackage(packageName)) {
+    if (!isAllowed(await loadPackagePolicy(OWNER_USER_ID), packageName)) {
       return NextResponse.json({ status: "ignored", package_name: packageName });
     }
 

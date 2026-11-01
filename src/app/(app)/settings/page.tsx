@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BudgetSettings } from "@/components/budget-settings";
 import { VersionCard } from "@/components/version-card";
+import { ConnectedAppsCard } from "@/components/connected-apps-card";
 
 function timestamp() {
   return new Date().toLocaleTimeString("es-AR", { hour12: false });
@@ -354,6 +355,8 @@ export default function SettingsPage() {
       </Card>
 
       <DevicesCard />
+
+      <ConnectedAppsCard />
 
       {/* Logs panel */}
       <Card>

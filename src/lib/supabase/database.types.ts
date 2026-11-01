@@ -320,6 +320,39 @@ export type Database = {
           },
         ]
       }
+      push_ingest_apps: {
+        Row: {
+          created_at: string
+          decided_via: string
+          decision: string
+          id: string
+          label: string | null
+          package_name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          decided_via?: string
+          decision: string
+          id?: string
+          label?: string | null
+          package_name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          decided_via?: string
+          decision?: string
+          id?: string
+          label?: string | null
+          package_name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       push_ingest_devices: {
         Row: {
           created_at: string

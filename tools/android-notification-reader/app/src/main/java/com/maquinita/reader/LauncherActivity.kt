@@ -28,6 +28,10 @@ class LauncherActivity : TwaLauncherActivity() {
         SensorWatchdog.schedule(this)
         // Opening the app is also the moment the widget is most likely to be looked at.
         WidgetRefresh.requestNow(this)
+        // The app list follows the server; opening the app pulls any change made in
+        // Ajustes on the web, and keeps the hourly sync scheduled.
+        AppsSync.schedule(this)
+        AppsSync.requestNow(this)
         val problem = sensorProblem() ?: return
         warn(problem)
     }

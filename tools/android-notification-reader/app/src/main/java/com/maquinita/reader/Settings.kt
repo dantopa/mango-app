@@ -24,6 +24,10 @@ class Settings(context: Context) {
     val widgetEndpoint: String
         get() = app.getString(R.string.twa_url) + WIDGET_PATH
 
+    /** The list of apps to read: GET to download it, POST to record an answer. */
+    val appsEndpoint: String
+        get() = app.getString(R.string.twa_url) + APPS_PATH
+
     var token: String
         get() = prefs.getString(KEY_TOKEN, "").orEmpty()
         set(value) {
@@ -53,6 +57,7 @@ class Settings(context: Context) {
     private companion object {
         const val INGEST_PATH = "/api/push-ingest"
         const val WIDGET_PATH = "/api/widget"
+        const val APPS_PATH = "/api/push-ingest/apps"
         const val KEY_TOKEN = "token"
         const val KEY_LAST_RESULT = "last_result"
         const val KEY_LAST_RESULT_AT = "last_result_at"

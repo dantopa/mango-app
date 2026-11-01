@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { executePipeline } from "@/lib/push-ingest/pipeline";
 import { computeDedupKey } from "@/lib/push-ingest/dedup";
 import { getSupabaseAdmin } from "@/lib/push-ingest/supabase-admin";
-import { PACKAGE_WHITELIST } from "@/lib/push-ingest/package-whitelist";
+import { loadPackagePolicy } from "@/lib/push-ingest/package-policy";
 import type { PushPayload } from "@/lib/push-ingest/types";
 import type { SyncSourceResult, SyncItemDetail } from "@/lib/sync/types";
 
@@ -62,12 +62,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   const maxPastDays = Math.ceil((Date.now() - monthStart.getTime()) / MS_PER_DAY) + 7;
 
   const admin = getSupabaseAdmin();
+  const policy = await loadPackagePolicy(OWNER_USER_ID);
 
   const { data: rawLogs, error: fetchError } = await admin
     .from("push_raw_log")
     .select("id, package_name, payload, received_at")
     .eq("user_id", OWNER_USER_ID)
-    .in("package_name", [...PACKAGE_WHITELIST])
+    .in("package_name", [...policy.allowed])
     .gte("received_at", bounds.from)
     .lte("received_at", bounds.to)
     .order("received_at", { ascending: true });
