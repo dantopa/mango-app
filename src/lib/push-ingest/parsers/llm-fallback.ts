@@ -95,9 +95,19 @@ const PACKAGE_TITLE_REQUIREMENTS: Record<string, RegExp> = {
   "com.grability.rappi": /compra exitosa/i,
 };
 
-/** Returns true if the notification should be sent to LLM fallback */
-export function shouldTryLlmFallback(packageName: string, title: string): boolean {
-  if (!PACKAGE_WHITELIST.has(packageName)) return false;
+/**
+ * Returns true if the notification should be sent to LLM fallback.
+ *
+ * `allowed` is the user's app list (defaults + decisions, see package-policy.ts):
+ * an app the user approved on the phone has to reach the AI, since no
+ * deterministic parser was ever written for it.
+ */
+export function shouldTryLlmFallback(
+  packageName: string,
+  title: string,
+  allowed: ReadonlySet<string> = PACKAGE_WHITELIST,
+): boolean {
+  if (!allowed.has(packageName)) return false;
   const titleRequirement = PACKAGE_TITLE_REQUIREMENTS[packageName];
   if (titleRequirement && !titleRequirement.test(title)) return false;
   return true;

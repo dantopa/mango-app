@@ -7,14 +7,16 @@ import android.service.notification.StatusBarNotification
 import org.json.JSONObject
 
 /**
- * Reads notifications from the financial apps and hands them to the ingest queue.
+ * Reads notifications and decides, through PackagePolicy, what happens to each.
  *
- * Only whitelisted packages are read: the service can see every notification on
- * the phone, and nothing outside this list should ever leave the device. The
- * server enforces the same list — this copy is what keeps unrelated notification
- * text from being uploaded at all.
+ * Apps on the user's list go to the ingest queue. An app nobody decided about,
+ * whose notification looks like money moving, is held on the phone and the user is
+ * asked "¿Registrar los pagos de esta app?". Everything else is dropped right here:
+ * the service can see every notification on the phone, and nothing outside the
+ * list ever leaves the device.
  *
- * Keep in sync with src/lib/push-ingest/package-whitelist.ts.
+ * The list itself comes from the server (PolicyStore / AppsSyncWorker), so adding
+ * a bank no longer needs a new APK.
  */
 class NotificationReaderService : NotificationListenerService() {
 
@@ -36,8 +38,6 @@ class NotificationReaderService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (sbn.packageName !in WHITELIST) return
-
         val extras = sbn.notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
 
@@ -50,10 +50,8 @@ class NotificationReaderService : NotificationListenerService() {
 
         if (title.isBlank() && text.isBlank()) return
 
-        // An SMS app carries everything: personal messages and one-time codes as
-        // well as bank alerts. The package alone is not a good enough filter, so
-        // its content has to earn the upload.
-        if (sbn.packageName in SMS_PACKAGES && !isFinancialSms(title, text)) return
+        val verdict = PolicyStore(applicationContext).current().decide(sbn.packageName, title, text)
+        if (verdict == PackagePolicy.Verdict.IGNORE) return
 
         val payload = JSONObject()
             .put("packageName", sbn.packageName)
@@ -63,20 +61,32 @@ class NotificationReaderService : NotificationListenerService() {
             // same notification twice collapses server-side instead of duplicating.
             .put("timestamp", sbn.postTime)
             .put("key", sbn.key)
+            .toString()
 
-        IngestQueue.add(applicationContext, payload.toString())
-        UploadWorker.enqueue(applicationContext)
+        if (verdict == PackagePolicy.Verdict.FORWARD) {
+            IngestQueue.add(applicationContext, payload)
+            UploadWorker.enqueue(applicationContext)
+            return
+        }
+
+        // CANDIDATE: kept on the phone until the user answers. An ongoing notification
+        // (player, navigation, an upload) is never a payment worth asking about.
+        if (sbn.isOngoing) return
+        val label = appLabel(sbn.packageName)
+        val waiting = CandidateStore(applicationContext).hold(sbn.packageName, label, payload)
+        val sample = listOf(title, text).filter { it.isNotBlank() }.joinToString(": ").take(160)
+        AppPrompt.show(applicationContext, sbn.packageName, label, sample, waiting)
     }
 
     /**
-     * The sender is as good a signal as the body — bank alerts arrive from a short
-     * code or a brand name — so both are matched. A one-time code is dropped even
-     * when it names the bank: it never describes an expense, and it is the most
-     * sensitive text on the phone.
+     * The name the user knows the app by. Package visibility hides most apps from
+     * us on Android 11+, so a readable guess from the package name is the fallback.
      */
-    private fun isFinancialSms(title: String, text: String): Boolean {
-        val message = "$title $text"
-        return FINANCIAL_SIGNAL.containsMatchIn(message) && !ONE_TIME_CODE.containsMatchIn(message)
+    private fun appLabel(packageName: String): String = try {
+        val info = packageManager.getApplicationInfo(packageName, 0)
+        packageManager.getApplicationLabel(info).toString().ifBlank { PackagePolicy.fallbackLabel(packageName) }
+    } catch (_: Exception) {
+        PackagePolicy.fallbackLabel(packageName)
     }
 
     companion object {
@@ -85,48 +95,5 @@ class NotificationReaderService : NotificationListenerService() {
 
         /** Whether the system has this listener bound right now. */
         val isConnected: Boolean get() = connected
-
-        private val SMS_PACKAGES = setOf(
-            "com.google.android.apps.messaging",
-            "com.samsung.android.messaging",
-            "com.android.mms",
-        )
-
-        // Nexo and other foreign services write in English, so both languages are
-        // matched. A brand name alone counts as a signal, which is why the one-time
-        // code list below has to cover both languages too.
-        private val FINANCIAL_SIGNAL = Regex(
-            "bancolombia|nequi|bbva|brubank|rappi|nexo|davivienda|" +
-                "compra|transacci[oó]n|d[eé]bito|cr[eé]dito|retiro|pago|transferencia|consumo|" +
-                "purchase|transaction|debit|credit card|withdraw|payment|transfer|charged",
-            RegexOption.IGNORE_CASE,
-        )
-
-        private val ONE_TIME_CODE = Regex(
-            "c[oó]digo|clave (?:temporal|din[aá]mica|segura)|token|\\botp\\b|" +
-                "verificaci[oó]n|no la compartas|no lo compartas|" +
-                "\\bcode\\b|verification|passcode|one[- ]time|do(?:n't| not) share",
-            RegexOption.IGNORE_CASE,
-        )
-
-        private val WHITELIST = setOf(
-            // Banking apps
-            "com.todo1.mobile",                     // Bancolombia
-            "com.bbva.nxt_argentina",               // BBVA Argentina
-            "com.nequi.MobileApp",                  // Nequi
-            "com.brubank",                          // Brubank (Argentina)
-
-            // Payment / card apps
-            "com.grability.rappi",                  // Rappi / RappiCard
-            "com.google.android.apps.walletnfcrel", // Google Wallet (tap-to-pay)
-
-            // Crypto / broker
-            "com.nexowallet",                       // Nexo
-
-            // SMS / messaging (bank alerts come via SMS too)
-            "com.google.android.apps.messaging",    // Google Messages
-            "com.samsung.android.messaging",        // Samsung Messages
-            "com.android.mms",                      // AOSP SMS
-        )
     }
 }

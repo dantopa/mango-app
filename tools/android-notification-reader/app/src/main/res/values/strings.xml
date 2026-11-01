@@ -53,4 +53,13 @@
     <string name="widget_unauthorized_body">El servidor no reconoce este teléfono. Tocá para vincularlo de nuevo.</string>
     <string name="widget_empty_title">Maquinita</string>
     <string name="widget_empty_body">Cargando tu mes… se actualiza apenas haya conexión.</string>
+
+    <!-- AppPrompt: asked once per app that looks like it moves money. -->
+    <string name="apps_channel_name">Apps nuevas</string>
+    <string name="apps_channel_description">Cuando una app que no conocemos manda algo que parece un pago.</string>
+    <string name="apps_prompt_title">¿Registrar los pagos de %1$s?</string>
+    <string name="apps_prompt_body_one">%1$s\n\nSi decís que sí, este pago y los próximos se registran solos. Hasta entonces no sale nada del teléfono.</string>
+    <string name="apps_prompt_body_many">%1$s\n\nHay %2$d avisos esperando. Si decís que sí, se registran todos, y los próximos también. Hasta entonces no sale nada del teléfono.</string>
+    <string name="apps_prompt_yes">Sí, registrar</string>
+    <string name="apps_prompt_no">No, ignorar</string>
 </resources>

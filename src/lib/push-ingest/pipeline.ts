@@ -25,6 +25,7 @@ import "./parsers"; // side-effect: registers all parsers
 const GOOGLE_WALLET_PACKAGE = "com.google.android.apps.walletnfcrel";
 import { OWNER_USER_ID } from "../owner";
 import { checkSms } from "./sms-gate";
+import { loadPackagePolicy } from "./package-policy";
 
 /**
  * How far before a purchase's date its notification may have been logged.
@@ -180,7 +181,9 @@ async function runParsers(
   const fromTemplate = await tryTemplateParser(payload, userId);
   if (fromTemplate.kind !== "unknown") return fromTemplate;
 
-  if (!shouldTryLlmFallback(payload.packageName, payload.title)) return { kind: "unknown" };
+  // Read only here, after the free parsers failed: most notifications never get this far.
+  const { allowed } = await loadPackagePolicy(userId);
+  if (!shouldTryLlmFallback(payload.packageName, payload.title, allowed)) return { kind: "unknown" };
 
   console.log(`[push-ingest] no parser/template for ${payload.packageName}, escalating to AI`);
   return llmFallbackParser(payload, userId, await loadAccounts());

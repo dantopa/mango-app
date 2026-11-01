@@ -40,18 +40,36 @@ está exportado y `@xml/filepaths` lo limita a ese directorio.
 
 ## Cómo funciona el sensor
 
-1. `NotificationReaderService` recibe cada notificación, descarta todo lo que no
-   esté en el whitelist y encola el payload.
+1. `NotificationReaderService` recibe cada notificación y `PackagePolicy` decide:
+   reenviar (app de la lista), preguntar (app nueva que parece un pago) o
+   descartar (todo lo demás).
 2. `UploadWorker` (WorkManager) drena la cola contra el endpoint, con reintentos
    exponenciales y constraint de red. Si el celu está sin internet, la compra no
    se pierde: queda en la cola.
 3. El servidor dedupea por `dedup_key`, así que reenviar la misma notificación no
    duplica el gasto.
 
-El whitelist está duplicado en `NotificationReaderService.kt` a propósito: el
-servidor también lo valida, pero filtrar en el celular es lo que evita que texto
-de notificaciones ajenas salga del dispositivo. Si agregás un paquete en
-`src/lib/push-ingest/package-whitelist.ts`, agregalo acá también.
+## Qué apps lee (sin recompilar)
+
+La lista de apps **no está compilada en la APK**: el celu la baja de
+`GET /api/push-ingest/apps` (tabla `push_ingest_apps` + los defaults de
+`src/lib/push-ingest/package-whitelist.ts`). `AppsSyncWorker` la sincroniza cada
+hora y cada vez que se abre la app; `PolicyStore` guarda la copia local.
+`PackagePolicy.DEFAULT_ALLOWED` solo se usa antes del primer sync.
+
+Cuando una app que nadie decidió manda algo con **un monto y un verbo de plata**
+("Pagaste US$100…") y no es un código, el celu:
+
+1. la guarda en `CandidateStore` (en el teléfono, máximo 7 días; no sale nada),
+2. muestra "¿Registrar los pagos de Brubank?" con **Sí / No** (`AppPrompt`),
+3. con **Sí**: la agrega a la lista, sube los avisos retenidos (el pago que
+   disparó la pregunta no se pierde) y postea la decisión al servidor;
+   con **No**: la bloquea y borra lo retenido.
+
+También se puede activar o ignorar cualquier app desde **Ajustes → Apps
+conectadas** en la web; el celu se entera en el próximo sync. Las apps de chat
+(WhatsApp, Telegram, Gmail, etc., `NEVER_ALLOWED`) nunca se leen ni se pueden
+aprobar, ni desde el celu ni desde el servidor.
 
 Las apps de SMS tienen además un filtro de contenido, solo en el celular: el
 paquete por sí solo no alcanza porque ahí entran los mensajes personales y los
@@ -190,7 +208,13 @@ keytool -list -v -keystore ~/.android/maquinita-release.keystore -alias maquinit
 ```
 
 Perder la keystore no es grave: como no se distribuye por Play Store, se genera
-otra y se actualiza el fingerprint.
+otra y se actualiza el fingerprint. El costo es que Android no deja instalar una
+APK firmada con otra clave encima de la anterior: hay que desinstalar y vincular
+el teléfono de nuevo.
+
+La v1.1 se firmó con una keystore nueva (tercer fingerprint de `assetlinks.json`,
+`8A:1A:…:55:BA`). Para que los próximos builds se instalen encima, esa keystore
+es la que tiene que quedar en `~/.android/` con su `keystore.properties`.
 
 ## Configuración en el celular
 

@@ -188,6 +188,14 @@
         </receiver>
 
         <!--
+          The Sí / No of "¿Registrar los pagos de esta app?". Not exported: only the
+          prompt's own PendingIntents reach it, so no other app can approve itself.
+        -->
+        <receiver
+            android:name=".AppDecisionReceiver"
+            android:exported="false" />
+
+        <!--
           SensorWatchdog needs no declaration: WorkManager's own provider registers
           its workers, and reschedules them after a reboot.
         -->
