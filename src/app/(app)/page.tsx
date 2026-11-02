@@ -120,7 +120,7 @@ export default function DashboardPage() {
         description="Tu foto financiera consolidada en dólares."
       />
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Net worth */}
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -161,7 +161,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick stats */}
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <SemaphoreGauge />
         <StatCard
           label={`Gasto ${currentMonth ? formatMonth(currentMonth + "-01") : "del mes"}`}
