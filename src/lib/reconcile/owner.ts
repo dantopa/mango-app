@@ -19,7 +19,7 @@ export type OwnerIdentity = {
 };
 
 /** Only these texts describe a transfer; anything else is never internal. */
-const RE_TRANSFER = /transferiste|recibiste\s+(?:una\s+transferencia|un\s+pago)|transferencia\s+de/i;
+const RE_TRANSFER = /transferiste|le\s+enviaste|recibiste\s+(?:una\s+transferencia|un\s+pago)|transferencia\s+de/i;
 
 /** Sender of incoming money: "recibiste una transferencia de NAME por $85,000". */
 const RE_SENDER = /recibiste\s+(?:una\s+transferencia|un\s+pago)\s+de\s+(.+?)\s+(?:por|en)\s+\$/i;
@@ -37,14 +37,30 @@ const RE_RECIPIENT = /\sa\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ.\s]+?)\s+el\s+\d{
  */
 const RE_DESTINATION_KEY = /\ba\s+la\s+(?:llave|cuenta)\s+\*?(@?[\w.+-]+)/gi;
 
+/**
+ * Words of a name, comparable across banks. A lone letter is glued to the next
+ * word: Brubank writes "D Andrea" and Bancolombia "DANDREA" for the same
+ * surname, and "D'Andrea" becomes "D ANDREA" once the apostrophe is dropped.
+ */
 function normalizeName(value: string): string[] {
-  return value
+  const words = value
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toUpperCase()
     .replace(/[^A-Z\s]/g, " ")
     .split(/\s+/)
     .filter(Boolean);
+
+  const merged: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    if (words[i].length === 1 && i + 1 < words.length) {
+      merged.push(words[i] + words[i + 1]);
+      i++;
+    } else {
+      merged.push(words[i]);
+    }
+  }
+  return merged;
 }
 
 function normalizeKey(value: string): string {

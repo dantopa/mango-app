@@ -141,6 +141,19 @@ export function useGoals() {
   });
 }
 
+/**
+ * After a transaction changes, everything computed from transactions has to be
+ * re-read: the list, and the month's spend against the ceiling. The gauge is its
+ * own query, so invalidating only the list left it showing the old total —
+ * discarding a self-transfer still read "techo superado" until its cache expired.
+ */
+function invalidateSpend(qc: ReturnType<typeof useQueryClient>) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+    qc.invalidateQueries({ queryKey: ["semaphore"] }),
+  ]);
+}
+
 export function useUpdateTransaction() {
   const qc = useQueryClient();
   return useMutation({
@@ -156,7 +169,7 @@ export function useUpdateTransaction() {
 
       if (values.category_id) await learnCategoryRule(id, values.category_id);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+    onSuccess: () => invalidateSpend(qc),
   });
 }
 
@@ -223,7 +236,7 @@ export function useDeleteTransaction() {
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+    onSuccess: () => invalidateSpend(qc),
   });
 }
 
@@ -239,7 +252,7 @@ export function useDeleteTransactions() {
         .in("id", ids);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+    onSuccess: () => invalidateSpend(qc),
   });
 }
 

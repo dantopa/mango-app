@@ -296,7 +296,10 @@ Rules — a violation makes the whole answer unusable:
    "COP7,525.00", "ARS23.280,00", "-COP124,414.00").
 2. Set is_transaction=false for anything that must NOT be recorded at all:
    declined or rejected purchases, delivery/shipping updates, promotions, login
-   alerts, price alerts, incoming transfers, balance updates. Explain in "reason".
+   alerts, price alerts, incoming transfers, balance updates, and requests to
+   approve or confirm a payment that has not happened yet ("¿Quieres aprobar…?",
+   "Approve this payment"): the confirmation that follows is the movement.
+   Explain in "reason".
 3. A refund, reimbursement or chargeback is NOT covered by rule 2, even though
    it reduces spending instead of adding to it: set is_transaction=true and
    is_refund=true. It must be recorded — the app needs it to cancel out the
