@@ -386,6 +386,31 @@ describe("reconcile — Bug 3: transfers between the owner's accounts", () => {
     expect(run([incoming]).changes[0].to.status).toBe("internal_transfer");
   });
 
+  it("recognizes a Brubank transfer to the owner, who writes the surname as 'D Andrea'", () => {
+    const brubank = row({
+      origin: "push_ingest",
+      amount_native: 80,
+      native_currency: "USD",
+      external_ts: "2026-11-03T05:59:14Z",
+      merchant: "Patricio Eduardo D Andrea Escoda",
+      description_raw: "Tienes una notificación de Brubank: Le enviaste U$S 80 a Patricio Eduardo D Andrea Escoda  💵",
+    });
+    const change = run([brubank]).changes[0];
+    expect(change.to.status).toBe("internal_transfer");
+  });
+
+  it("still treats a Brubank transfer to someone else as spend", () => {
+    const toFriend = row({
+      origin: "push_ingest",
+      amount_native: 95_000,
+      native_currency: "ARS",
+      external_ts: "2026-11-03T05:58:45Z",
+      merchant: "Juan Pablo Perez",
+      description_raw: "Tienes una notificación de Brubank: Le enviaste $ 95.000 a Juan Pablo Perez  💵",
+    });
+    expect(run([toFriend]).changes).toEqual([]);
+  });
+
   it("leaves transfers to other people as they are", () => {
     const toFriend = row({
       account_id: BANCOLOMBIA,
